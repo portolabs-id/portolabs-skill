@@ -20,29 +20,52 @@ Data model (`src/api/classmate*/content-types/*/schema.json` in the brief-servic
 
 Use the Claude in Chrome tools (`mcp__claude-in-chrome__*`); the user is signed in to Google and Strapi there. Never type a password: on a sign-in page, ask the user to sign in.
 
-1. **List the files.** Take the folder id from the link (`/folders/<id>`), open `https://drive.google.com/embeddedfolderview?id=<id>#list`, and read it with `javascript_tool`:
+1. **List the files.** Open the folder link as the user gave it (keep its `/u/<n>/` account index) and read the rows with `javascript_tool`:
    ```js
-   [...document.querySelectorAll('a[href*="/file/d/"]')].map((a) => ({
-     id: a.href.match(/\/file\/d\/([\w-]+)/)[1],
-     name: (a.querySelector('.flip-entry-title') ?? a).innerText.trim(),
-   }))
+   [...new Map([...document.querySelectorAll('[data-id]')]
+     .filter((e) => /^[\w-]{20,}$/.test(e.dataset.id))
+     .map((e) => [e.dataset.id, (e.getAttribute('aria-label') || e.innerText).replace(/\s+/g, ' ').trim()]))]
+     .map(([id, name]) => `${name} | ${id.match(/.{1,3}/g).join(' ')}`)
    ```
-   Empty result: open the folder itself in List view, scroll to the end, and read names and ids from the rows. Keep `.mp4` files; list every other file (PDF, PPT, MOV) as skipped.
-2. **Check sharing.** The server downloads without a Google login, so every file must be "Anyone with the link". For each id:
+   The browser tool replaces strings that look like base64 with `[BLOCKED: Base64 encoded data]`, and Drive ids do. So the snippet returns each id in groups of 3 characters: remove the spaces before you use it. The first row is the folder itself. Drive renders only the rows on screen, so in a long folder scroll to the end and run it again. Keep `.mp4` files. List every other file (PDF, PPT, MOV) as skipped, and also any file whose name says not to use it (`[DO NOT UPLOAD]`, `jangan dipakai`).
+2. **Check sharing.** The server downloads without a Google login, so every file must be "Anyone with the link". Put `<order> <id>` lines in a scratchpad file and run:
    ```bash
-   curl -s -r 0-0 --max-time 20 -D - -o /dev/null "https://drive.usercontent.google.com/download?id=<id>&export=download&confirm=t" | grep -i content-disposition
+   while read -r n id; do echo "$n $(curl -s -r 0-0 --max-time 30 -D - -o /dev/null "https://drive.usercontent.google.com/download?id=$id&export=download&confirm=t" | grep -iE '^content-(disposition|range)' | tr -d '\r' | tr '\n' ' ')"; done < ids.txt
    ```
-   No `Content-Disposition` line: the file is private. Ask the user to share the folder as "Anyone with the link", then check again.
+   Drive sometimes answers slowly and the line comes back empty. Check every empty line once more before you call the file private. Still empty: ask the user to share the folder as "Anyone with the link", then check again. `Content-Range` ends with the file size: a file near 1 GB takes about 5 minutes to import.
 3. **Order and group** (see the next section) and show the table. Stop until the user approves or edits it.
 4. **Target classmate.** Ask: new Classmate, or add to an existing one?
    - New: ask `accessType` (and `price` for price types), `difficulty` and an optional description. Create it at `/admin/content-manager/collection-types/api::classmate.classmate/create`, title from the approved table, then **Save** (not Publish).
    - Existing: open it, read its lessons and tests, and continue after the highest `order` and `moduleOrder`. Reuse an existing `moduleTitle` only when the user's table says so.
-5. **One lesson at a time, in table order**, at `/admin/content-manager/collection-types/api::classmate-lesson.classmate-lesson/create`:
-   1. Fill `title`, `order`, `moduleTitle`, `moduleOrder`, `isFree` (ask once which lessons are free previews; default off) and pick the classmate in the `classmate` relation box.
-   2. Under "Atau import dari Google Drive", put the same link `https://drive.google.com/file/d/<id>/view` in **Link Drive 720p** and **Link Drive 480p**. Replace "video_id baru" with `<classmate-slug>-<NN>` (`NN` = `order`, two digits).
-   3. Click **Import dari Drive**. The box shows "Server menyalin dari Google Drive…". Check it about every 30 s with `find`/`read_page`; do not leave the page while it runs. The server imports one video at a time, so a long folder takes a while.
-   4. On "Selesai. Klik Save untuk menyimpan.", click **Save**. Then click **Generate Thumbnail** in the side panel (it answers right away).
-6. **Report**: the final table with each lesson's `video_id`, the classmate admin link, skipped files, and any failure. Say that everything is still a draft.
+5. **One lesson at a time, in table order**, at `/admin/content-manager/collection-types/api::classmate-lesson.classmate-lesson/create`. Ask once which lessons are free previews (`isFree`, default off). Use `browser_batch` so one lesson takes a few calls.
+   1. **Text fields and Drive links** with `javascript_tool`. Fill in `f`: the same Drive link goes in both the 720p and the 480p box, and `videoId` is `<classmate-slug>-<NN>` (`NN` = `order`, two digits).
+      ```js
+      const f = { title: '…', order: 1, moduleTitle: '…', moduleOrder: 1, link: 'https://drive.google.com/file/d/<id>/view', videoId: '<classmate-slug>-01' };
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const q = (name) => document.querySelector(`input[name="${name}"]`);
+      const driveInputs = () => [...document.querySelectorAll('input[placeholder*="drive.google.com/file"]')];
+      for (let i = 0; i < 30 && !(q('title') && driveInputs().length === 2); i++) await sleep(500);
+      await sleep(1000);
+      const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      const set = (el, v) => { el.focus(); setValue.call(el, String(v)); el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); el.blur(); };
+      set(q('title'), f.title); set(q('order'), f.order); set(q('moduleTitle'), f.moduleTitle); set(q('moduleOrder'), f.moduleOrder);
+      driveInputs().forEach((el) => set(el, f.link));
+      await sleep(500);
+      // Typing a link makes the field propose "video-<6 chars>" in the "video_id baru" box.
+      const draftId = [...document.querySelectorAll('input')].find((el) => /^video-[a-z0-9]{6}$/.test(el.value));
+      if (!draftId) throw new Error('form not ready');
+      set(draftId, f.videoId);
+      ```
+   2. **Classmate relation**: click the `classmate` box, type the classmate title, wait 2 s, and click the option with `computer` (find it with `find` the first time, then reuse its coordinates). A JavaScript `click()` on the option does not select it. Check that the field label now reads `classmate (1)`.
+   3. **isFree**: for a free preview, click **TRUE** with `computer`.
+   4. **Import**: click **Import dari Drive** (a JavaScript `click()` works here). The box shows "Server menyalin dari Google Drive…" until "Selesai. Klik Save untuk menyimpan.". Every `javascript_tool` call times out after 45 s, so check the status in short calls, about every 30 s:
+      ```js
+      [...document.querySelectorAll('p,span')].map((e) => e.innerText).find((t) => /Selesai|menyalin|gagal|tidak|bukan|sudah ada|lebih dari/i.test(t))
+      ```
+      Do not leave the page while it runs. The server imports one video at a time.
+   5. **Save**, then wait until the URL no longer ends in `/create`. Click **Generate Thumbnail** in the side panel and wait about 12 s. The admin shows the thumbnail as a plain file icon (blog thumbnails look the same), so check that the field has a `lesson-thumbnail-<n>.webp` file, not a preview.
+   6. After the first two lessons, reload one and check that every field was saved, including the ones set by JavaScript.
+6. **Check and report.** Open `/admin/content-manager/collection-types/api::classmate-lesson.classmate-lesson?sort=order:ASC&filters[$and][0][classmate][title][$eq]=<classmate title>` and confirm the lesson count. Then report the final table with each lesson's `video_id`, the classmate admin link, skipped files, and any failure. Say that everything is still a draft.
 
 ## Ordering and grouping
 
@@ -74,6 +97,8 @@ Then list skipped files with the reason, and ask: "Urutan dan modul ini sudah be
 | "… tidak bisa didownload. Pastikan sharing-nya \"Anyone with the link\"." | Ask the user to fix sharing, then import again. |
 | "… bukan MP4." / "… lebih dari 5 GB." | Skip the lesson and report it. |
 | "File video belum ada di R2 …" on Save | The import is not finished. Wait for "Selesai", then Save. |
+| `CDP sendCommand "Runtime.evaluate" timed out after 45000ms` | Only the tool call stopped; the import keeps running. Check the status again in short calls. |
+| "form not ready" from the fill snippet | The page was still loading. Run the snippet again. |
 
 ## Red flags
 

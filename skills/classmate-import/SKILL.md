@@ -7,7 +7,7 @@ description: Use when inserting a Portolabs classmate (kelas/course) from a Goog
 
 ## Overview
 
-One Drive folder of MP4s becomes one Classmate with ordered lessons grouped into modules. File names are often random, so **you** decide the order and the modules, show them as a table, and write nothing to Strapi until the user approves it.
+One Drive folder of MP4s becomes one Classmate with ordered lessons grouped into modules, each with a one-paragraph summary of its video in `content` under `## Rangkuman`. File names are often random, so **you** decide the order and the modules, show them with the summaries, and write nothing to Strapi until the user approves it.
 
 The Strapi admin at `https://api.portolabs.id/admin` is **production**. Save everything as a draft. Publish only when the user says so in this conversation.
 
@@ -33,22 +33,34 @@ Use the Claude in Chrome tools (`mcp__claude-in-chrome__*`); the user is signed 
    while read -r n id; do echo "$n $(curl -s -r 0-0 --max-time 30 -D - -o /dev/null "https://drive.usercontent.google.com/download?id=$id&export=download&confirm=t" | grep -iE '^content-(disposition|range)' | tr -d '\r' | tr '\n' ' ')"; done < ids.txt
    ```
    Drive sometimes answers slowly and the line comes back empty. Check every empty line once more before you call the file private. Still empty: ask the user to share the folder as "Anyone with the link", then check again. `Content-Range` ends with the file size: a file near 1 GB takes about 5 minutes to import.
-3. **Order and group** (see the next section) and show the table. Stop until the user approves or edits it.
-4. **Target classmate.** Ask: new Classmate, or add to an existing one?
+3. **Transcribe.** Needs `mlx_whisper` (`command -v mlx_whisper`). If it is missing, ask the user to run `uv tool install mlx-whisper`. Its first run downloads the model (about 1.6 GB, around 10 minutes). In the scratchpad, start this with `run_in_background` and carry on while it runs:
+   ```bash
+   caffeinate -is zsh -c 'mkdir -p transcripts && while read -r n id; do
+     curl -sSL -C - --retry 5 --retry-all-errors --speed-limit 10000 --speed-time 60 -o "transcripts/$n.mp4" "https://drive.usercontent.google.com/download?id=$id&export=download&confirm=t" &&
+     ffmpeg -nostdin -loglevel error -y -i "transcripts/$n.mp4" -vn -ac 1 -ar 16000 -c:a libmp3lame -b:a 32k "transcripts/$n.mp3" &&
+     rm "transcripts/$n.mp4" &&
+     mlx_whisper "transcripts/$n.mp3" --model mlx-community/whisper-large-v3-turbo --language id --output-format txt --output-dir transcripts --verbose False < /dev/null || echo "GAGAL $n"
+   done < ids.txt'
+   ```
+   `caffeinate -is` keeps the Mac awake while the loop runs. Without it, an idle Mac sleeps and freezes the downloads for hours. It cannot keep a closed lid awake on battery, so ask the user to leave the lid open or the Mac on power. `curl` gives up on a download stuck under 10 KB/s for 60 s and resumes it (`-C -`). Do not point `ffmpeg` at the Drive URL: it has no timeout. Only one MP4 is on disk at a time. Whisper does an hour of audio in about 3 minutes. Run `GAGAL` lines again, alone.
+4. **Summarize.** When the transcripts are done, give one subagent (`model: "sonnet"`) the `transcripts/` folder and this brief: for each `<n>.txt`, write one paragraph of 3–5 sentences in Indonesian about what the video teaches, using only what the transcript says. Fix names whisper mishears (it writes "portalabs" for Portolabs). State the content directly: no "teman-teman", no "di video ini". A transcript under 30 words (music, silence) gets no summary. Write `summaries.md` with a `## <n>` heading per file. Read only `summaries.md`, so the transcripts stay out of your context.
+5. **Order and group** (see the next section) and show the table, then the summaries by `order`. Stop until the user approves or edits both.
+6. **Target classmate.** Ask: new Classmate, or add to an existing one? Ask this while the transcription runs.
    - New: ask `accessType` (and `price` for price types), `difficulty` and an optional description. Create it at `/admin/content-manager/collection-types/api::classmate.classmate/create`, title from the approved table, then **Save** (not Publish).
    - Existing: open it, read its lessons and tests, and continue after the highest `order` and `moduleOrder`. Reuse an existing `moduleTitle` only when the user's table says so.
-5. **One lesson at a time, in table order**, at `/admin/content-manager/collection-types/api::classmate-lesson.classmate-lesson/create`. Ask once which lessons are free previews (`isFree`, default off). Use `browser_batch` so one lesson takes a few calls.
-   1. **Text fields and Drive links** with `javascript_tool`. Fill in `f`: the same Drive link goes in both the 720p and the 480p box, and `videoId` is `<classmate-slug>-<NN>` (`NN` = `order`, two digits).
+7. **One lesson at a time, in table order**, at `/admin/content-manager/collection-types/api::classmate-lesson.classmate-lesson/create`. Ask once which lessons are free previews (`isFree`, default off). Use `browser_batch` so one lesson takes a few calls.
+   1. **Text fields and Drive links** with `javascript_tool`. Fill in `f`: the same Drive link goes in both the 720p and the 480p box, `videoId` is `<classmate-slug>-<NN>` (`NN` = `order`, two digits), and `content` is the approved summary as `'## Rangkuman\n\n<paragraph>'` (escape quotes; leave `content` out for a lesson with no summary).
       ```js
-      const f = { title: '…', order: 1, moduleTitle: '…', moduleOrder: 1, link: 'https://drive.google.com/file/d/<id>/view', videoId: '<classmate-slug>-01' };
+      const f = { title: '…', order: 1, moduleTitle: '…', moduleOrder: 1, content: '## Rangkuman\n\n…', link: 'https://drive.google.com/file/d/<id>/view', videoId: '<classmate-slug>-01' };
       const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-      const q = (name) => document.querySelector(`input[name="${name}"]`);
+      const q = (name) => document.querySelector(`[name="${name}"]`);
       const driveInputs = () => [...document.querySelectorAll('input[placeholder*="drive.google.com/file"]')];
       for (let i = 0; i < 30 && !(q('title') && driveInputs().length === 2); i++) await sleep(500);
       await sleep(1000);
-      const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-      const set = (el, v) => { el.focus(); setValue.call(el, String(v)); el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); el.blur(); };
+      // The prototype's setter, so React sees the change; `content` is a textarea, the rest are inputs.
+      const set = (el, v) => { el.focus(); Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value').set.call(el, String(v)); el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); el.blur(); };
       set(q('title'), f.title); set(q('order'), f.order); set(q('moduleTitle'), f.moduleTitle); set(q('moduleOrder'), f.moduleOrder);
+      if (f.content) set(q('content'), f.content);
       driveInputs().forEach((el) => set(el, f.link));
       await sleep(500);
       // Typing a link makes the field propose "video-<6 chars>" in the "video_id baru" box.
@@ -65,7 +77,7 @@ Use the Claude in Chrome tools (`mcp__claude-in-chrome__*`); the user is signed 
       Do not leave the page while it runs. The server imports one video at a time.
    5. **Save**, then wait until the URL no longer ends in `/create`. Click **Generate Thumbnail** in the side panel and wait about 12 s. The admin shows the thumbnail as a plain file icon (blog thumbnails look the same), so check that the field has a `lesson-thumbnail-<n>.webp` file, not a preview.
    6. After the first two lessons, reload one and check that every field was saved, including the ones set by JavaScript.
-6. **Check and report.** Open `/admin/content-manager/collection-types/api::classmate-lesson.classmate-lesson?sort=order:ASC&filters[$and][0][classmate][title][$eq]=<classmate title>` and confirm the lesson count. Then report the final table with each lesson's `video_id`, the classmate admin link, skipped files, and any failure. Say that everything is still a draft.
+8. **Check and report.** Open `/admin/content-manager/collection-types/api::classmate-lesson.classmate-lesson?sort=order:ASC&filters[$and][0][classmate][title][$eq]=<classmate title>` and confirm the lesson count. Then report the final table with each lesson's `video_id`, the classmate admin link, skipped files, and any failure. Say that everything is still a draft.
 
 ## Ordering and grouping
 
@@ -74,7 +86,7 @@ Clean each name first: drop the extension, leading numbers, and noise such as `7
 Decide the order from the strongest signal you have:
 1. **Numbers in the name**: `01`, `1.2`, `M2-03`, `Part 3`, `Eps 4`, `Sesi 2`, `Day 5`. `1.2` means module 1, lesson 2.
 2. **Topic logic**: intro/pengenalan/overview first, then setup/instalasi, basics before advanced, studi kasus/project/latihan near the end, penutup/kesimpulan/outro last.
-3. **Unreadable names** (`IMG_1234`, `video (3)`, `Rekaman 2026-…`): open the folder in Grid view and `zoom` into each thumbnail, or open the file's preview and screenshot the first frame, to read its title card. Then use the dates in the Drive list as a tiebreaker.
+3. **Unreadable names** (`IMG_1234`, `video (3)`, `Rekaman 2026-…`): read how the video opens (`head -c 600 transcripts/<n>.txt`) and its summary. Still unclear: open the folder in Grid view and `zoom` into each thumbnail to read its title card. Then use the dates in the Drive list as a tiebreaker.
 
 Group into modules by shared topic, usually 3–7 lessons each. Under 6 videos with one topic: one module. Give modules short Indonesian titles ("Pengenalan Figma", not "Module 1"). Clean lesson titles into readable Indonesian, keeping product names as they are.
 
@@ -87,7 +99,7 @@ Show the plan in this shape, and mark every row you guessed with `?` in **Alasan
 | 1 | Pengenalan Figma | 1 | Apa itu Figma | `rec_final2.mp4` | judul "intro" |
 | 1 | Pengenalan Figma | 2 | Instalasi dan akun | `IMG_4410.mp4` | ? title card "Install" |
 
-Then list skipped files with the reason, and ask: "Urutan dan modul ini sudah benar?"
+Then list the summaries as `**<order>. <Judul lesson>**` followed by its paragraph, list skipped files with the reason, and ask: "Urutan, modul, dan rangkuman ini sudah benar?"
 
 ## Errors
 
@@ -108,4 +120,5 @@ Then list skipped files with the reason, and ask: "Urutan dan modul ini sudah be
 | "Order mulai dari 1 lagi tiap modul" | `order` is one sequence across the course, after any existing lessons and tests. |
 | "Publish biar langsung kelihatan" | Save as draft. Publish only when the user asks. |
 | "Upload videonya lewat browser" | Use **Import dari Drive**. The server copies the file. |
+| "Rangkumannya tulis dari judul saja, transkripnya lama" | Write a summary only from its transcript. No transcript, no summary: say so in the report. |
 | "Strapi minta login, isi saja passwordnya" | Ask the user to sign in. |

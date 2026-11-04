@@ -1,5 +1,29 @@
 """Self-check for the pace logic: python3 scripts/test_build_draft.py"""
-from build_draft import SpeechTimeline, caption_chunks
+import copy
+import json
+
+from build_draft import (TEMPLATE_DIR, PROTO, SpeechTimeline, caption_chunks, kept_loudness, resolve_text_layout,
+                         silences_for_kept, text_box)
+
+TEMPLATE = json.loads((TEMPLATE_DIR / "draft_info.json").read_text())
+TEXT_MATERIALS = {m["id"]: m for m in TEMPLATE["materials"]["texts"]}
+
+
+def proto_text(name, start=0.0, end=2.0, text=None):
+    track, index = PROTO[name]
+    seg = copy.deepcopy(TEMPLATE["tracks"][track]["segments"][index])
+    material = copy.deepcopy(TEXT_MATERIALS[seg["material_id"]])
+    if text is not None:
+        content = json.loads(material["content"])
+        content["text"] = text
+        material["content"] = json.dumps(content)
+    seg["target_timerange"] = {"start": int(start * 1e6), "duration": int((end - start) * 1e6)}
+    kind = {"subtitle": "subtitle", "credit": "credit"}.get(name, "text")
+    return {"label": name, "kind": kind, "seg": seg, "material": material, "effect": name.startswith("card")}
+
+
+def overlaps(a, b):
+    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
 
 
 def words(*spans):
@@ -66,6 +90,55 @@ def test_word_that_swallows_a_pause_is_flagged():
     timeline = SpeechTimeline(w, [[0, 2]], media_duration=10, silences=[[0, 1.0], [1.9, 2.5], [3.6, 10]])
     flags = timeline.transcript_flags()
     assert len(flags) == 1 and "[1]" in flags[0], flags
+
+
+def test_silence_threshold_follows_the_kept_speech_not_the_whole_file():
+    """A file with a long quiet stretch (another recording far from the mic) drags its overall
+    loudness down; the soft tail after a kept line (-45 dB under -20 dB speech) is still silence."""
+    window = 0.02
+    levels = [-20.0] * 50 + [-45.0] * 10 + [-80.0] * 40 + [-50.0] * 900  # speech, tail, pause, quiet chatter
+    audio = {"window": window, "levels": levels, "loudness": -32.0, "silences": []}
+    w = [{"i": 0, "w": "halo", "s": 0.0, "e": 1.0}]
+    silences = silences_for_kept(audio, w, [[0, 0]], media_duration=len(levels) * window)
+    assert abs(silences[0][0] - 1.0) < 0.03, silences
+
+
+def test_speech_gain_follows_the_kept_speech_not_the_whole_file():
+    """With the whole-file loudness (-32) the voice would be boosted ~6x and clip."""
+    levels = [-20.0] * 50 + [-80.0] * 50 + [-50.0] * 900
+    audio = {"window": 0.02, "levels": levels, "loudness": -32.0, "silences": []}
+    w = [{"i": 0, "w": "halo", "s": 0.0, "e": 1.0}]
+    assert abs(kept_loudness(audio, w, [[0, 0]]) - (-20.0)) < 0.5
+
+
+def test_text_box_matches_capcut_render_of_the_0827_hook():
+    """CapCut drew this hook at y 284-484 px, its widest line 764 px wide (0827 cover)."""
+    hook = proto_text("hook")
+    left, top, right, bottom = text_box(hook["seg"], hook["material"], hook["effect"])
+    assert abs(top - 284) < 25 and abs(bottom - 484) < 25 and abs((right - left) - 764) < 60, (left, top, right, bottom)
+
+
+def test_caption_moves_off_the_cta_it_would_hit():
+    caption, cta = proto_text("subtitle", 0, 1, "bisa banget daftar"), proto_text("cta", 0.5, 3)
+    notes = resolve_text_layout([caption, cta])
+    assert not overlaps(text_box(caption["seg"], caption["material"], False),
+                        text_box(cta["seg"], cta["material"], False)), notes
+    assert any("moved" in n for n in notes), notes
+
+
+def test_credit_watermark_moves_to_a_free_spot():
+    credit, cta = proto_text("credit", 0, 3), proto_text("cta", 1, 3)
+    credit["seg"]["clip"]["transform"] = {"x": -0.49, "y": -0.21}
+    notes = resolve_text_layout([credit, cta])
+    assert not overlaps(text_box(credit["seg"], credit["material"], False),
+                        text_box(cta["seg"], cta["material"], False)), notes
+    assert not any(n.startswith("FIX") for n in notes), notes
+
+
+def test_two_fixed_texts_on_top_of_each_other_are_reported():
+    hook, title = proto_text("hook", 0, 3), proto_text("logo_title", 1, 2)
+    notes = resolve_text_layout([hook, title])
+    assert any(n.startswith("FIX") for n in notes), notes
 
 
 def test_captions_attach_suffixes_and_percent():

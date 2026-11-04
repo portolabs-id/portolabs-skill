@@ -19,6 +19,8 @@ import time
 import uuid
 from pathlib import Path
 
+from transcribe import silences_from_levels
+
 SKILL_DIR = Path(__file__).resolve().parent.parent
 TEMPLATE_DIR = SKILL_DIR / "assets" / "template"
 DEFAULT_DRAFTS_ROOT = Path.home() / "Movies/CapCut/User Data/Projects/com.lveditor.draft"
@@ -56,6 +58,16 @@ CREDIT_EVERY = 12.0
 CREDIT_POSITIONS = [(-0.82, 0.76), (0.53, -0.17), (-0.58, -0.55), (0.60, 0.39), (-0.49, -0.21)]
 TARGET_LUFS = -14.0
 SPEECH_GAIN_RANGE = (0.5, 6.0)
+# A pause is anything this far under the loudness of the speech being kept (its 90th percentile).
+SILENCE_BELOW_KEPT_SPEECH_DB = -20
+# Text layout estimate, in px per (font size × scale), measured on CapCut's render of the 0827 cover.
+TEXT_LINE_PITCH = 6.3
+TEXT_CHAR_WIDTH = 2.95
+TEXT_INK_FILL = 0.9      # glyphs fill this much of the line pitch
+TEXT_BOX_PAD = 0.25      # background box around captions and the CTA, in line pitches
+TEXT_EFFECT_PAD = 0.5    # paper texture of the ART PAPER cards
+TEXT_GAP = 12            # px kept between two texts
+TEXT_SAFE_MARGIN = 0.05  # captions stay out of the top and bottom 5% of the frame
 SFX_LEAD = {"click": 0.1, "swish": 0.2, "pop": 0.0, "woosh": 0.0}
 
 # Prototype segments in the template: name -> (track index, segment index)
@@ -117,6 +129,34 @@ def cover_scale(width, height):
     """CapCut scale 1.0 = fit inside the canvas; this returns the scale that fills it."""
     fit = min(CANVAS_W / width, CANVAS_H / height)
     return max(CANVAS_W / (width * fit), CANVAS_H / (height * fit))
+
+
+def silences_for_kept(audio, words, keep, media_duration):
+    """Pauses judged against the speech that is kept. One file can hold a quieter recording
+    (people chatting far from the mic) that drags the overall loudness down, and then a word's
+    soft tail 20 dB under the voice would still count as speech and show up as dead air."""
+    if "levels" not in audio:
+        return audio["silences"]
+    threshold = _kept_levels(audio, words, keep)[1] + SILENCE_BELOW_KEPT_SPEECH_DB
+    return silences_from_levels(audio["levels"], threshold, media_duration, audio["window"])
+
+
+def kept_loudness(audio, words, keep):
+    """Energy average of the kept speech's voiced windows, so the speech gain is set for the voice
+    and not dragged up by quiet stretches elsewhere in the file."""
+    if "levels" not in audio:
+        return audio["loudness"]
+    spoken, speech_level = _kept_levels(audio, words, keep)
+    voiced = [level for level in spoken if level > speech_level + SILENCE_BELOW_KEPT_SPEECH_DB]
+    return 10 * math.log10(sum(10 ** (level / 10) for level in voiced) / len(voiced))
+
+
+def _kept_levels(audio, words, keep):
+    """Window levels inside the kept words, sorted, and their 90th percentile (the voice level)."""
+    window, levels = audio["window"], audio["levels"]
+    spoken = sorted(level for start, end in keep for i in range(start, end + 1)
+                    for level in levels[int(words[i]["s"] / window):int(words[i]["e"] / window) + 1])
+    return spoken, spoken[int(len(spoken) * 0.9)]
 
 
 def speech_gain(loudness):
@@ -454,12 +494,25 @@ class Editor:
             self.words[int(index)]["w"] = text
         self.aroll = self.path(plan["aroll"])
         self.aroll_material, self.aroll_info = draft.media_material(self.aroll)
-        self.gain = speech_gain(audio["loudness"])
-        self.speech = SpeechTimeline(self.words, plan["keep"], self.aroll_info["duration"], audio["silences"],
+        self.gain = speech_gain(kept_loudness(audio, self.words, plan["keep"]))
+        silences = silences_for_kept(audio, self.words, plan["keep"], self.aroll_info["duration"])
+        self.speech = SpeechTimeline(self.words, plan["keep"], self.aroll_info["duration"], silences,
                                      plan.get("trim_tail"))
         self.T = self.speech.duration
         self.sfx = []
         self.blur_spans = []
+        self.texts = []
+        self.layout_notes = []
+
+    def add_text(self, label, lane, proto, seg, item=None):
+        """Place a text layer and remember it for the layout check; plan items may set "y"."""
+        if item and item.get("y") is not None:
+            seg["clip"]["transform"]["y"] = item["y"]
+        self.draft.place(lane, proto, seg)
+        by_id = self.draft.by_id
+        self.texts.append({"label": label, "kind": proto if proto in ("subtitle", "credit") else "text", "seg": seg,
+                           "material": by_id[seg["material_id"]],
+                           "effect": any(by_id.get(r, {}).get("type") == "text_effect" for r in seg["extra_material_refs"])})
 
     def path(self, value):
         p = Path(value).expanduser()
@@ -479,6 +532,7 @@ class Editor:
         self.subtitles()
         self.cta()
         self.credit()
+        self.layout_notes = resolve_text_layout(self.texts)
         self.grading()
         self.sound_effects()
         return shots
@@ -504,7 +558,7 @@ class Editor:
         end = snap(self.speech.end(hook["until_word"]))
         seg = self.draft.segment("hook", 0, end)
         self.draft.set_text(seg, hook["text"], hook.get("highlight"))
-        self.draft.place("hook", "hook", seg)
+        self.add_text("hook", "hook", "hook", seg, hook)
         self.sfx.append((0.0, "woosh"))
         return end
 
@@ -561,7 +615,7 @@ class Editor:
         name = "card_full" if item.get("style") == "fullscreen" else "card_overlay"
         seg = self.draft.segment(name, start, end)
         self.draft.set_text(seg, item["text"])
-        self.draft.place("texts", name, seg)
+        self.add_text(f"card \"{item['text'].splitlines()[0]}\"", "texts", name, seg, item)
         self.sfx.append((start, "pop"))
         if name == "card_overlay":
             self.blur_spans.append((start, end))
@@ -572,10 +626,11 @@ class Editor:
         for item in self.plan.get("posters", []):
             start, end = self.span(item)
             material_id, info = d.media_material(self.path(item["file"]))
+            src_start = 0.0 if info["is_image"] else min(item.get("src_start", 0.0), info["duration"])
             if not info["is_image"]:
-                end = min(end, snap(start + info["duration"]))
+                end = min(end, snap(start + info["duration"] - src_start))
             seg = d.segment("poster", start, end, material_id=material_id)
-            seg["source_timerange"] = {"start": 0, "duration": seg["target_timerange"]["duration"]}
+            seg["source_timerange"] = {"start": us(src_start), "duration": seg["target_timerange"]["duration"]}
             lane = d.place("overlay", "poster", seg)
             seg["render_index"] = lane + 1
             self.blur_spans.append((start, end))
@@ -589,7 +644,7 @@ class Editor:
         if group.get("title"):
             title = d.segment("logo_title", start, end)
             d.set_text(title, group["title"])
-            d.place("texts", "logo_title", title)
+            self.add_text(f"logo title \"{group['title']}\"", "texts", "logo_title", title, group)
         drop = () if group.get("chroma", True) else ("chromas",)
         for n, file in enumerate(group["files"]):
             proto = "logo" if n == 0 else "logo_next"
@@ -726,7 +781,7 @@ class Editor:
             end = next_start if next_start - end < 0.3 else end + 0.1
             seg = self.draft.segment("subtitle", snap(start), snap(min(end, self.T)))
             self.draft.set_text(seg, text)
-            self.draft.place("subtitles", "subtitle", seg)
+            self.add_text(f"caption \"{text}\"", "subtitles", "subtitle", seg)
 
     def cta(self):
         cta = self.plan.get("cta")
@@ -735,7 +790,7 @@ class Editor:
         start, end = self.span(cta, end_default=self.T)
         seg = self.draft.segment("cta", start, end)
         self.draft.set_text(seg, cta["text"])
-        self.draft.place("texts", "cta", seg)
+        self.add_text("CTA", "texts", "cta", seg, cta)
         self.sfx.append((start, "pop"))
 
     def credit(self):
@@ -749,7 +804,7 @@ class Editor:
             self.draft.set_text(seg, f"Original content from {name}")
             x, y = CREDIT_POSITIONS[n % len(CREDIT_POSITIONS)]
             seg["clip"]["transform"] = {"x": x, "y": y}
-            self.draft.place("credit", "credit", seg)
+            self.add_text("credit", "credit", "credit", seg)
 
     def grading(self):
         for name in ("filter", "adjust"):
@@ -798,6 +853,110 @@ def set_scale_keyframes(seg, points):
                           for t, v in points],
     }]
     seg["clip"]["scale"] = {"x": points[0][1], "y": points[0][1]}
+
+
+def text_box(seg, material, has_effect):
+    """Estimated on-screen box (left, top, right, bottom) of a text layer in canvas px. CapCut lays
+    text out at render time, so this follows its measured behaviour: line pitch, glyph width and
+    the wrap width, calibrated on CapCut's own render of the 0827 cover."""
+    content = json.loads(material["content"])
+    unit = content["styles"][0].get("size", 15) * seg["clip"]["scale"]["x"]
+    pitch, char_width = TEXT_LINE_PITCH * unit, TEXT_CHAR_WIDTH * unit
+    lines = _wrap(content["text"], char_width, (material.get("line_max_width") or 0.82) * CANVAS_W)
+    width = max(len(line) for line in lines) * char_width
+    height = len(lines) * pitch * TEXT_INK_FILL
+    pad = pitch * (TEXT_EFFECT_PAD if has_effect else TEXT_BOX_PAD if material.get("background_style") else 0)
+    width, height = width + 2 * pad, height + 2 * pad
+    if abs(seg["clip"].get("rotation", 0)) == 90:
+        width, height = height, width
+    cx = CANVAS_W / 2 * (1 + seg["clip"]["transform"]["x"])
+    cy = CANVAS_H / 2 * (1 - seg["clip"]["transform"]["y"])
+    return cx - width / 2, cy - height / 2, cx + width / 2, cy + height / 2
+
+
+def _wrap(text, char_width, max_width):
+    lines = []
+    for paragraph in text.split("\n"):
+        line = ""
+        for word in paragraph.split():
+            candidate = f"{line} {word}".strip()
+            if line and len(candidate) * char_width > max_width:
+                lines.append(line)
+                line = word
+            else:
+                line = candidate
+        lines.append(line)
+    return lines
+
+
+def resolve_text_layout(texts):
+    """Keep every caption clear of the other texts on screen with it, moving it to the nearest free
+    height; report other texts that sit on each other (those stay where the plan put them)."""
+    box = lambda t: text_box(t["seg"], t["material"], t["effect"])
+    fixed = [t for t in texts if t["kind"] == "text"]
+    notes = []
+    for n, a in enumerate(fixed):
+        for b in fixed[n + 1:]:
+            if _same_time(a, b) and _boxes_hit(box(a), box(b)):
+                notes.append(f"FIX: {a['label']} and {b['label']} overlap from {_start(b):.2f}s: "
+                             "give one of them another \"y\" in the plan")
+    for credit in (t for t in texts if t["kind"] == "credit"):
+        around = [box(t) for t in fixed if _same_time(credit, t)]
+        if any(_boxes_hit(box(credit), b) for b in around):
+            notes.append(_move_credit(credit, around))
+    fixed += [t for t in texts if t["kind"] == "credit"]
+    moved = {}
+    for caption in (t for t in texts if t["kind"] == "subtitle"):
+        around = [t for t in fixed if _same_time(caption, t)]
+        hit = [t for t in around if _boxes_hit(box(caption), box(t))]
+        if not hit:
+            continue
+        y = _free_caption_y(caption, [box(t) for t in around])
+        names = " and ".join(t["label"] for t in hit)
+        if y is None:
+            notes.append(f"FIX: {caption['label']} at {_start(caption):.2f}s has no free place clear of {names}")
+            continue
+        caption["seg"]["clip"]["transform"]["y"] = y
+        first, _, count = moved.get(names, (_start(caption), y, 0))
+        moved[names] = (first, y, count + 1)
+    for names, (first, y, count) in moved.items():
+        notes.append(f"moved {count} caption(s) from {first:.2f}s to y {y:.2f}, clear of {names}")
+    return notes
+
+
+def _move_credit(credit, blockers):
+    """The watermark only has to be somewhere on screen: take the first credit spot that is free."""
+    transform = credit["seg"]["clip"]["transform"]
+    for x, y in CREDIT_POSITIONS:
+        transform.update(x=x, y=y)
+        if not any(_boxes_hit(text_box(credit["seg"], credit["material"], False), b) for b in blockers):
+            return f"moved credit at {_start(credit):.2f}s to x {x}, y {y}"
+    return f"FIX: credit at {_start(credit):.2f}s has no free spot"
+
+
+def _free_caption_y(caption, blockers):
+    left, top, right, bottom = text_box(caption["seg"], caption["material"], caption["effect"])
+    half, cy = (bottom - top) / 2, (top + bottom) / 2
+    candidates = [b[1] - TEXT_GAP - half for b in blockers] + [b[3] + TEXT_GAP + half for b in blockers]
+    for candidate in sorted(candidates, key=lambda c: abs(c - cy)):
+        spot = (left, candidate - half, right, candidate + half)
+        on_screen = spot[1] >= CANVAS_H * TEXT_SAFE_MARGIN and spot[3] <= CANVAS_H * (1 - TEXT_SAFE_MARGIN)
+        if on_screen and not any(_boxes_hit(spot, b) for b in blockers):
+            return round(1 - 2 * candidate / CANVAS_H, 3)
+    return None
+
+
+def _boxes_hit(a, b):
+    return a[0] < b[2] + TEXT_GAP and b[0] < a[2] + TEXT_GAP and a[1] < b[3] + TEXT_GAP and b[1] < a[3] + TEXT_GAP
+
+
+def _same_time(a, b):
+    ra, rb = a["seg"]["target_timerange"], b["seg"]["target_timerange"]
+    return ra["start"] < rb["start"] + rb["duration"] and rb["start"] < ra["start"] + ra["duration"]
+
+
+def _start(text):
+    return text["seg"]["target_timerange"]["start"] / SEC
 
 
 ATTACH = re.compile(r"^(-|%|[.,!?…:;])")
@@ -900,6 +1059,10 @@ def print_summary(editor, shots):
     print(f"\nTranscript check: {len(flags) or 'nothing'} to fix")
     for flag in flags:
         print(f"  FIX: {flag}")
+    to_fix = sum(note.startswith("FIX") for note in editor.layout_notes)
+    print(f"\nLayout check: {to_fix or 'nothing'} to fix")
+    for note in editor.layout_notes:
+        print(f"  {note}")
 
 
 def visible_tails(editor, shots):

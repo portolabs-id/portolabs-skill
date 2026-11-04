@@ -5,7 +5,7 @@ Usage: transcribe.py <video> <work_dir> [--language id] [--model REPO]
 
 Writes into <work_dir>:
   words.json  [{"i", "w", "s", "e"}]  words with source-time seconds
-  audio.json  {"loudness", "silences"} used by build_draft.py to cut pauses
+  audio.json  {"loudness", "silences", "window", "levels"} used by build_draft.py to cut pauses
 and prints an indexed transcript. Pauses longer than 0.3 s show as ‖<sec>.
 
 Each stretch of speech between silences is transcribed on its own, so repeated takes
@@ -66,16 +66,21 @@ def window_levels(wav):
 
 
 def detect_silences(wav, loudness, duration):
+    """Pauses for splitting whisper's clips, judged against the whole file's loudness.
+    build_draft.py judges again against the speech it actually keeps."""
+    return silences_from_levels(window_levels(wav), loudness + SILENCE_BELOW_SPEECH_DB, duration)
+
+
+def silences_from_levels(levels, threshold, duration, window=WINDOW):
     """Silent stretches [[start, end]], judged on RMS energy per window rather than per-sample
     peaks: a mouth click peaks loudly but carries no energy, and must not split a pause."""
-    threshold = loudness + SILENCE_BELOW_SPEECH_DB
     silences, start = [], None
-    for n, level in enumerate(window_levels(wav) + [0.0]):
+    for n, level in enumerate(levels + [0.0]):
         if level < threshold and start is None:
             start = n
         elif level >= threshold and start is not None:
-            if (n - start) * WINDOW >= SILENCE_MIN:
-                silences.append([round(start * WINDOW, 3), round(min(n * WINDOW, duration), 3)])
+            if (n - start) * window >= SILENCE_MIN:
+                silences.append([round(start * window, 3), round(min(n * window, duration), 3)])
             start = None
     merged = []
     for silence in silences:
@@ -149,13 +154,15 @@ def main():
     extract_audio(args.video, wav)
     duration = media_duration(wav)
     loudness = measure_loudness(wav)
-    silences = detect_silences(wav, loudness, duration)
+    levels = window_levels(wav)
+    silences = silences_from_levels(levels, loudness + SILENCE_BELOW_SPEECH_DB, duration)
     clips = speech_clips(silences, duration)
     words = flatten_words(run_whisper(wav, work, args.language, args.model, clips))
     if not words:
         sys.exit("No speech found in the video.")
     (work / "words.json").write_text(json.dumps(words, ensure_ascii=False))
-    (work / "audio.json").write_text(json.dumps({"loudness": loudness, "silences": silences}))
+    (work / "audio.json").write_text(json.dumps({"loudness": loudness, "silences": silences, "window": WINDOW,
+                                                 "levels": [round(v, 1) for v in levels]}))
     print_transcript(words)
     print(f"\n{len(words)} words, {len(clips)} speech stretches → {work / 'words.json'}")
 

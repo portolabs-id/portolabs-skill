@@ -35,6 +35,7 @@ Every time position is a **word index** from the transcript (`[index]word`). The
 | `words` | yes | `words.json` from `transcribe.py`. Its `audio.json` must sit next to it. |
 | `keep` | yes | Inclusive `[first, last]` word ranges, in video order. Anything not listed is cut. |
 | `word_fixes` | no | `{index: "text"}` corrections for subtitles. |
+| `trim_tail` | no | `{index: seconds}`: cut that much off the end of the cut that ends on this word, when the tail recheck shows the speaker looking away in the last frame. More than about 0.05 s clips the word itself; cover that tail with B-roll instead. |
 | `hook` | no | Top title from 0 s until `until_word` ends. `highlight` is a second line in yellow. Adds the opening woosh, plus a Glare II transition and swish where the hook ends. |
 | `broll` | no | Replaces the picture from `from_word` to `to_word`. `src_start` (seconds into the clip) is optional; the default is the middle of the clip. A clip shorter than its span ends early. |
 | `cards` | no | `fullscreen`: black textured background with ART PAPER text. `overlay`: the same text over the blurred A-roll. Both pop in with a "pop" SFX. Use `\n` for a line break. |

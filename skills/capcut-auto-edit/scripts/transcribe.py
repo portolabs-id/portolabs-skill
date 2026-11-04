@@ -24,15 +24,21 @@ PAUSE_MARK = 0.3
 SILENCE_BELOW_SPEECH_DB = -18
 SILENCE_MIN = 0.15
 NOISE_BLIP = 0.12
+WINDOW = 0.02
+SAMPLE_RATE = 16000
 DEFAULT_LUFS = -20.0
-# Speech stretches separated by less than this are transcribed together.
-CLIP_SPLIT_GAP = 0.6
+# Every pause the edit cuts (build_draft MAX_GAP) also splits whisper's clips: inside one clip
+# whisper tidies a retake away ("bisa banget, bisa banget daftar" → "bisa banget daftar").
+CLIP_SPLIT_GAP = 0.3
 CLIP_PAD = 0.2
 
 
 def extract_audio(video, wav):
-    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(video),
-                    "-vn", "-ac", "1", "-ar", "16000", str(wav)], check=True)
+    """Mono 16 kHz WAV on the video's clock: CapCut places audio by the stream timestamps, so a
+    late audio start or timestamp drift (common in phone recordings) is padded, not dropped.
+    Without this, every cut lands up to seconds away from the speech it was meant for."""
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(video), "-vn", "-ac", "1", "-ar", str(SAMPLE_RATE),
+                    "-af", "aresample=async=1:first_pts=0", str(wav)], check=True)
 
 
 def ffmpeg_filter_log(wav, audio_filter):
@@ -51,31 +57,48 @@ def media_duration(path):
     return float(out.stdout.strip())
 
 
+def window_levels(wav):
+    """RMS level (dB) of each WINDOW-long slice of the 16 kHz WAV."""
+    log = ffmpeg_filter_log(wav, f"asetnsamples=n={round(SAMPLE_RATE * WINDOW)}:p=0,"
+                                 "astats=metadata=1:reset=1:measure_perchannel=none:measure_overall=RMS_level,"
+                                 "ametadata=print:key=lavfi.astats.Overall.RMS_level")
+    return [float(v) if v != "-inf" else -120.0 for v in re.findall(r"RMS_level=(\S+)", log)]
+
+
 def detect_silences(wav, loudness, duration):
-    """Silent stretches [[start, end]]; tiny noise blips between them are merged away."""
-    log = ffmpeg_filter_log(wav, f"silencedetect=noise={loudness + SILENCE_BELOW_SPEECH_DB:.1f}dB:d={SILENCE_MIN}")
-    starts = [float(x) for x in re.findall(r"silence_start: (-?[\d.]+)", log)]
-    ends = [float(x) for x in re.findall(r"silence_end: ([\d.]+)", log)]
-    ends += [duration] * (len(starts) - len(ends))
+    """Silent stretches [[start, end]], judged on RMS energy per window rather than per-sample
+    peaks: a mouth click peaks loudly but carries no energy, and must not split a pause."""
+    threshold = loudness + SILENCE_BELOW_SPEECH_DB
+    silences, start = [], None
+    for n, level in enumerate(window_levels(wav) + [0.0]):
+        if level < threshold and start is None:
+            start = n
+        elif level >= threshold and start is not None:
+            if (n - start) * WINDOW >= SILENCE_MIN:
+                silences.append([round(start * WINDOW, 3), round(min(n * WINDOW, duration), 3)])
+            start = None
     merged = []
-    for start, end in zip(starts, ends):
-        if merged and start - merged[-1][1] < NOISE_BLIP:
-            merged[-1][1] = end
+    for silence in silences:
+        if merged and silence[0] - merged[-1][1] < NOISE_BLIP:
+            merged[-1][1] = silence[1]
         else:
-            merged.append([round(max(start, 0.0), 3), round(end, 3)])
+            merged.append(silence)
     return merged
 
 
 def speech_clips(silences, duration):
-    """Complement of the long silences, padded: the stretches whisper should hear."""
-    clips, cursor = [], 0.0
+    """Stretches of speech between pauses, padded into the pause but never past its middle,
+    so neighbouring clips never hear the same audio twice."""
+    clips, cursor, lead = [], 0.0, 0.0
     for start, end in silences:
-        if end - start >= CLIP_SPLIT_GAP:
-            if start > cursor:
-                clips.append((max(cursor - CLIP_PAD, 0.0), min(start + CLIP_PAD, duration)))
-            cursor = end
+        if end - start < CLIP_SPLIT_GAP:
+            continue
+        pad = min(CLIP_PAD, (end - start) / 2)
+        if start > cursor:
+            clips.append((max(cursor - lead, 0.0), min(start + pad, duration)))
+        cursor, lead = end, pad
     if duration > cursor:
-        clips.append((max(cursor - CLIP_PAD, 0.0), duration))
+        clips.append((max(cursor - lead, 0.0), duration))
     return clips
 
 

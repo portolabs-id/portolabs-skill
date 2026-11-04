@@ -32,8 +32,17 @@ IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".bmp"}
 # Pace: a pause longer than MAX_GAP is cut out; the pads keep word attacks and tails intact.
 MAX_GAP = 0.3
 PAD_BEFORE = 0.06
-PAD_AFTER = 0.10
+# Short on purpose: speakers reading a script glance down at it right as a line ends.
+PAD_AFTER = 0.05
 EDGE_SEARCH = 0.6
+# Tail recheck: frames shown before every visible jump cut, newest last.
+TAIL_OFFSETS = [0.3, 0.2, 0.1, 1 / FPS]
+TAIL_ROWS_PER_SHEET = 6
+MAX_WORD_CLIP = 0.05
+# Transcript check: longest phrase looked for when catching "said twice in a row", and how much
+# sound a word needs on both sides of a pause before that pause counts as hidden inside it.
+MAX_REPEAT_WORDS = 4
+MIN_SOUND_AROUND_PAUSE = 0.1
 # Visual rhythm
 MIN_SHOT = 0.4
 LONG_SHOT = 3.0
@@ -124,21 +133,28 @@ class SpeechTimeline:
     decides where speech starts, stops and pauses; the words only decide what is kept.
     """
 
-    def __init__(self, words, keep, media_duration, silences):
+    def __init__(self, words, keep, media_duration, silences, trim_tail=None):
+        """trim_tail: {word index: seconds} cut off the end of the piece that ends on that word,
+        for tails where the speaker already looks away (at the script) as the word finishes."""
         self.words = words
         self.silences = silences
         self.media_duration = media_duration
         self.kept = [i for start, end in keep for i in range(start, end + 1)]
         if not self.kept:
             sys.exit("plan.keep selects no words.")
+        trim_tail = {int(k): v for k, v in (trim_tail or {}).items()}
+        self.warnings = [f"trim_tail[{i}] cuts ~{1000 * (t - PAD_AFTER):.0f} ms off the word itself: "
+                         "cover that tail with B-roll instead of trimming"
+                         for i, t in trim_tail.items() if t - PAD_AFTER > MAX_WORD_CLIP]
         self.pieces, self.out = [], {}
         cursor = 0.0
         for run in self._runs(self.kept):
             run_pieces = []
             for src_start, src_end in self._drop_pauses(*self._speech_edges(run)):
-                dur = snap(src_end - src_start)
+                last_word = max((i for i in run if words[i]["s"] < src_end), default=run[0])
+                dur = snap(src_end - trim_tail.get(last_word, 0) - src_start)
                 if dur > 0:
-                    run_pieces.append({"src_start": src_start, "out": cursor, "dur": dur})
+                    run_pieces.append({"src_start": src_start, "out": cursor, "dur": dur, "last_word": last_word})
                     cursor = snap(cursor + dur)
             for i in run:
                 start = _to_output(run_pieces, self.words[i]["s"], prefer_next=True)
@@ -147,6 +163,38 @@ class SpeechTimeline:
             self.pieces += run_pieces
         self.duration = cursor
         self.cuts = [p["out"] for p in self.pieces[1:]]
+
+    def transcript_flags(self):
+        """Spots in the kept speech that will sound wrong: a phrase said twice in a row, or a word
+        whose span swallows a pause (whisper probably hid a repeat or false start in it)."""
+        flags = []
+        text = [_normalized(self.words[i]["w"]) for i in self.kept]
+        n = 0
+        while n < len(text):
+            size = next((k for k in range(MAX_REPEAT_WORDS, 0, -1)
+                         if n + 2 * k <= len(text) and text[n:n + k] == text[n + k:n + 2 * k]
+                         and self._sounds_like_retake(n, k)), 0)
+            if size:
+                first, second = self.kept[n:n + size], self.kept[n + size:n + 2 * size]
+                flags.append(f"said twice: [{first[0]}-{first[-1]}] and [{second[0]}-{second[-1]}] "
+                             f"\"{' '.join(text[n:n + size])}\": keep only the later take")
+            n += size or 1
+        for i in self.kept:
+            w = self.words[i]
+            inner = [e - s for s, e in self.silences
+                     if s - w["s"] >= MIN_SOUND_AROUND_PAUSE and w["e"] - e >= MIN_SOUND_AROUND_PAUSE]
+            pause = max(inner, default=0)
+            if pause > MAX_GAP:
+                flags.append(f"[{i}]{w['w']} spans {w['s']:.2f}-{w['e']:.2f}s across a {pause:.2f}s pause: "
+                             "whisper may have dropped words there (a repeat or false start)")
+        return flags
+
+    def _sounds_like_retake(self, n, size):
+        """A repeat of two or more words, or any repeat after a pause; "gua, gua nggak" is just talk."""
+        if size >= 2:
+            return True
+        before, after = self.words[self.kept[n + size - 1]], self.words[self.kept[n + size]]
+        return after["s"] - before["e"] > MAX_GAP
 
     @staticmethod
     def _runs(kept):
@@ -221,6 +269,10 @@ class SpeechTimeline:
     def piece_end(self, t):
         piece, _ = self.source_at(t)
         return snap(piece["out"] + piece["dur"])
+
+
+def _normalized(word):
+    return word.lower().strip(".,!?…:;\"'")
 
 
 def _to_output(pieces, src_time, prefer_next):
@@ -403,7 +455,8 @@ class Editor:
         self.aroll = self.path(plan["aroll"])
         self.aroll_material, self.aroll_info = draft.media_material(self.aroll)
         self.gain = speech_gain(audio["loudness"])
-        self.speech = SpeechTimeline(self.words, plan["keep"], self.aroll_info["duration"], audio["silences"])
+        self.speech = SpeechTimeline(self.words, plan["keep"], self.aroll_info["duration"], audio["silences"],
+                                     plan.get("trim_tail"))
         self.T = self.speech.duration
         self.sfx = []
         self.blur_spans = []
@@ -841,6 +894,56 @@ def print_summary(editor, shots):
     for s in shots:
         label = s["kind"] + (" blur" if s["blur"] else "") + (f" {s['style']}" if s.get("style") not in (None, "none") else "")
         print(f"  {s['start']:6.2f}-{s['end']:6.2f}  {label}")
+    for warning in sp.warnings:
+        print(f"WARNING: {warning}")
+    flags = sp.transcript_flags()
+    print(f"\nTranscript check: {len(flags) or 'nothing'} to fix")
+    for flag in flags:
+        print(f"  FIX: {flag}")
+
+
+def visible_tails(editor, shots):
+    """Speech pieces whose last frame is on screen: an A-roll shot that ends where the piece ends."""
+    tails = []
+    for shot in shots:
+        if shot["kind"] != "aroll":
+            continue
+        piece, _ = editor.speech.source_at(shot["end"] - 1 / FPS)
+        if abs(snap(piece["out"] + piece["dur"]) - shot["end"]) < 1e-6:
+            tails.append(piece)
+    return tails
+
+
+def render_tail_sheets(editor, shots, out_dir):
+    """One row per visible jump cut: frames 0.3, 0.2, 0.1 s and one frame before the cut."""
+    out_dir.mkdir(exist_ok=True)
+    for old in out_dir.glob("*.jpg"):
+        old.unlink()
+    rows = []
+    for n, piece in enumerate(visible_tails(editor, shots)):
+        src_end = piece["src_start"] + piece["dur"]
+        inputs, scales = [], []
+        for k, offset in enumerate(TAIL_OFFSETS):
+            inputs += ["-ss", f"{max(src_end - offset, 0):.3f}", "-i", str(editor.aroll)]
+            scales.append(f"[{k}:v]scale=-2:300[f{k}]")
+        stack = "".join(f"[f{k}]" for k in range(len(TAIL_OFFSETS)))
+        row = out_dir / f"row-{n:02d}.jpg"
+        subprocess.run(["ffmpeg", "-loglevel", "error", "-y", *inputs, "-filter_complex",
+                        ";".join(scales) + f";{stack}hstack=inputs={len(TAIL_OFFSETS)}", "-frames:v", "1",
+                        str(row)], check=True)
+        rows.append(row)
+        word = editor.words[piece["last_word"]]
+        sheet = n // TAIL_ROWS_PER_SHEET + 1
+        print(f"  sheet-{sheet} row {n % TAIL_ROWS_PER_SHEET + 1}: cut at {piece['out'] + piece['dur']:6.2f}s, "
+              f"ends on [{word['i']}]{word['w']}")
+    for start in range(0, len(rows), TAIL_ROWS_PER_SHEET):
+        group = rows[start:start + TAIL_ROWS_PER_SHEET]
+        sheet = out_dir / f"sheet-{start // TAIL_ROWS_PER_SHEET + 1}.jpg"
+        subprocess.run(["ffmpeg", "-loglevel", "error", "-y", *[a for r in group for a in ("-i", str(r))],
+                        "-filter_complex", f"vstack=inputs={len(group)}" if len(group) > 1 else "null",
+                        str(sheet)], check=True)
+    for row in rows:
+        row.unlink()
 
 
 def main():
@@ -861,6 +964,9 @@ def main():
                          "speech", "sfx"], editor.T)
     print_summary(editor, shots)
     if args.dry_run:
+        tails_dir = plan_path.parent / "tails"
+        print(f"\nTail recheck → {tails_dir} (frames 0.3 / 0.2 / 0.1 / 0 s before each cut):")
+        render_tail_sheets(editor, shots, tails_dir)
         return
     first_piece = editor.speech.pieces[0]
     write_draft(data, draft_dir, draft_dir.name, editor.T, editor.aroll, first_piece["src_start"] + 0.5)

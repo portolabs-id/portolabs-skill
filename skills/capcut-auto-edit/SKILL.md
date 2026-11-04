@@ -50,12 +50,15 @@ Keep working files in a scratch folder (`<work>`), never inside the CapCut draft
 7. **Fix the transcript check.** The dry-run also prints `Transcript check:` with one `FIX:` line per spot that will sound wrong. Clear every line, then dry-run again until it says `nothing to fix`:
    - `said twice`: a phrase repeats back to back in what you kept ("bisa banget, bisa banget daftar…"). Take the earlier copy out of `keep`, so only the later take remains.
    - `spans … across a pause`: one word stretches over a pause, so whisper probably hid a repeat or false start inside it. Use another take of that sentence. If there is none, tell the user the time in the source video to check by ear.
-8. **Recheck the tail of every cut.** People reading a script glance down at it as a line ends, and a glance just before a jump cut looks like a mistake. The dry-run writes `<work>/tails/sheet-N.jpg` and lists what each row is: one row per cut the viewer sees, with the frames 0.3 / 0.2 / 0.1 / 0 s before the cut. Read every sheet. For each row where the eyes leave the camera (down at the script, sideways, closed) or the head turns away:
+8. **Fix the layout check.** Captions and texts must never sit on each other or hide each other. The dry-run estimates every text's box on screen (calibrated on CapCut's own rendering) and prints `Layout check:`.
+   - It moves captions clear of the hook, cards, logo title and CTA by itself, and moves the credit watermark to a free spot. These show up as `moved …` lines; nothing to do.
+   - A `FIX:` line means two texts placed by the plan (hook, card, logo title, CTA) overlap. Give one of them a different `"y"` in the plan (−1 bottom … 1 top), or shorten its text or time. Dry-run again until it says `nothing to fix`.
+9. **Recheck the tail of every cut.** People reading a script glance down at it as a line ends, and a glance just before a jump cut looks like a mistake. The dry-run writes `<work>/tails/sheet-N.jpg` and lists what each row is: one row per cut the viewer sees, with the frames 0.3 / 0.2 / 0.1 / 0 s before the cut. Read every sheet. For each row where the eyes leave the camera (down at the script, sideways, closed) or the head turns away:
    - Only the last frame is off: add `"trim_tail": {"<word index>": 0.04}` for the word the row ends on.
    - Off from 0.1 s or earlier: the glance starts while the word is still sounding, so trimming would clip the word (the dry-run prints a `WARNING` when a trim does). Cover the end of that phrase with B-roll instead. Another moment of a clip you already used is fine.
    Dry-run and read the sheets again until every tail looks at the camera.
-9. **Build.** Run the same command without `--dry-run`. It writes a new draft folder (never overwrites one) named after `plan.name`, with a cover frame. CapCut finds new folders in its projects folder by itself, even while it is open. If the draft does not appear, the user restarts CapCut.
-10. **Report** the draft name, its duration, which takes you used, and which assets were missing and so left out. Offer changes ("hook lebih pendek", "B-roll ini taruh di kalimat X"): edit the plan and build again under a new name.
+10. **Build.** Run the same command without `--dry-run`. It writes a new draft folder (never overwrites one) named after `plan.name`, with a cover frame. CapCut finds new folders in its projects folder by itself, even while it is open. If the draft does not appear, the user restarts CapCut.
+11. **Report** the draft name, its duration, which takes you used, and which assets were missing and so left out. Offer changes ("hook lebih pendek", "B-roll ini taruh di kalimat X"): edit the plan and build again under a new name.
 
 ## Notes
 

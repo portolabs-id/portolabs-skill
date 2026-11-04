@@ -39,9 +39,11 @@ Every time position is a **word index** from the transcript (`[index]word`). The
 | `hook` | no | Top title from 0 s until `until_word` ends. `highlight` is a second line in yellow. Adds the opening woosh, plus a Glare II transition and swish where the hook ends. |
 | `broll` | no | Replaces the picture from `from_word` to `to_word`. `src_start` (seconds into the clip) is optional; the default is the middle of the clip. A clip shorter than its span ends early. |
 | `cards` | no | `fullscreen`: black textured background with ART PAPER text. `overlay`: the same text over the blurred A-roll. Both pop in with a "pop" SFX. Use `\n` for a line break. |
-| `posters` | no | Image or video floating over the blurred A-roll, Shake Down in, with a click. |
+| `posters` | no | Image or video floating over the blurred A-roll, Shake Down in, with a click. A video plays from `src_start` (seconds, default 0). Use posters for landscape screen recordings: as `broll` they would be cropped to a narrow vertical slice. |
 | `logos` | no | Each group: optional `title` text, then the logos staggered in from the right, each with a click. Set `chroma` to false for plain images. |
 | `clicks` | no | Words that get a mouse-click SFX, e.g. each item of a spoken list. |
 | `punch_in` | no | Words that get a fast zoom-in and a swish: the punchline, the CTA. |
 | `cta` | no | Black text in a white box from `from_word` to the end (or `to_word`). |
 | `credit` | no | Creator name for the "Original content from …" watermark that moves corners. |
+
+`hook`, each card, each logo group (its title) and `cta` also take an optional `"y"`: the vertical position from −1 (bottom) to 1 (top), used when the layout check reports two texts overlapping. Captions move out of the way on their own.

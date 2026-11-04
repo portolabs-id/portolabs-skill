@@ -1,0 +1,141 @@
+#!/usr/bin/env python3
+"""Transcribe an A-roll video with word timestamps (mlx_whisper) and map its silences.
+
+Usage: transcribe.py <video> <work_dir> [--language id] [--model REPO]
+
+Writes into <work_dir>:
+  words.json  [{"i", "w", "s", "e"}]  words with source-time seconds
+  audio.json  {"loudness", "silences"} used by build_draft.py to cut pauses
+and prints an indexed transcript. Pauses longer than 0.3 s show as ‖<sec>.
+
+Each stretch of speech between silences is transcribed on its own, so repeated takes
+stay separate and word timestamps do not drift across pauses.
+"""
+import argparse
+import json
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+DEFAULT_MODEL = "mlx-community/whisper-large-v3-turbo"
+PAUSE_MARK = 0.3
+# Silence = quieter than the recording's speech loudness minus this many dB.
+SILENCE_BELOW_SPEECH_DB = -18
+SILENCE_MIN = 0.15
+NOISE_BLIP = 0.12
+DEFAULT_LUFS = -20.0
+# Speech stretches separated by less than this are transcribed together.
+CLIP_SPLIT_GAP = 0.6
+CLIP_PAD = 0.2
+
+
+def extract_audio(video, wav):
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(video),
+                    "-vn", "-ac", "1", "-ar", "16000", str(wav)], check=True)
+
+
+def ffmpeg_filter_log(wav, audio_filter):
+    return subprocess.run(["ffmpeg", "-nostats", "-i", str(wav), "-af", audio_filter, "-f", "null", "-"],
+                          capture_output=True, text=True).stderr
+
+
+def measure_loudness(wav):
+    found = re.findall(r"I:\s+(-?[\d.]+) LUFS", ffmpeg_filter_log(wav, "ebur128=framelog=quiet"))
+    return float(found[-1]) if found else DEFAULT_LUFS
+
+
+def media_duration(path):
+    out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
+                          str(path)], capture_output=True, text=True, check=True)
+    return float(out.stdout.strip())
+
+
+def detect_silences(wav, loudness, duration):
+    """Silent stretches [[start, end]]; tiny noise blips between them are merged away."""
+    log = ffmpeg_filter_log(wav, f"silencedetect=noise={loudness + SILENCE_BELOW_SPEECH_DB:.1f}dB:d={SILENCE_MIN}")
+    starts = [float(x) for x in re.findall(r"silence_start: (-?[\d.]+)", log)]
+    ends = [float(x) for x in re.findall(r"silence_end: ([\d.]+)", log)]
+    ends += [duration] * (len(starts) - len(ends))
+    merged = []
+    for start, end in zip(starts, ends):
+        if merged and start - merged[-1][1] < NOISE_BLIP:
+            merged[-1][1] = end
+        else:
+            merged.append([round(max(start, 0.0), 3), round(end, 3)])
+    return merged
+
+
+def speech_clips(silences, duration):
+    """Complement of the long silences, padded: the stretches whisper should hear."""
+    clips, cursor = [], 0.0
+    for start, end in silences:
+        if end - start >= CLIP_SPLIT_GAP:
+            if start > cursor:
+                clips.append((max(cursor - CLIP_PAD, 0.0), min(start + CLIP_PAD, duration)))
+            cursor = end
+    if duration > cursor:
+        clips.append((max(cursor - CLIP_PAD, 0.0), duration))
+    return clips
+
+
+def run_whisper(wav, out_dir, language, model, clips):
+    clip_arg = ",".join(f"{t:.2f}" for clip in clips for t in clip)
+    subprocess.run(["mlx_whisper", str(wav), "--model", model, "--language", language,
+                    "--word-timestamps", "True", "--output-format", "json",
+                    "--output-dir", str(out_dir), "--condition-on-previous-text", "False",
+                    "--clip-timestamps", clip_arg, "--verbose", "False"], check=True)
+    return json.loads((out_dir / f"{wav.stem}.json").read_text())
+
+
+def flatten_words(result):
+    words = []
+    for seg in result["segments"]:
+        for w in seg.get("words", []):
+            text = w["word"].strip()
+            if text:
+                words.append({"i": len(words), "w": text, "s": round(w["start"], 3), "e": round(w["end"], 3)})
+    return words
+
+
+def print_transcript(words):
+    line, line_start = [], 0.0
+    for idx, w in enumerate(words):
+        gap = w["s"] - words[idx - 1]["e"] if idx else 0
+        if line and gap > PAUSE_MARK:
+            print(f"{line_start:7.2f}s  " + " ".join(line) + f"  ‖{gap:.1f}s")
+            line = []
+        if not line:
+            line_start = w["s"]
+        line.append(f"[{w['i']}]{w['w']}")
+    if line:
+        print(f"{line_start:7.2f}s  " + " ".join(line))
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("video")
+    ap.add_argument("work_dir")
+    ap.add_argument("--language", default="id")
+    ap.add_argument("--model", default=DEFAULT_MODEL)
+    args = ap.parse_args()
+
+    work = Path(args.work_dir)
+    work.mkdir(parents=True, exist_ok=True)
+    wav = work / "aroll.wav"
+    extract_audio(args.video, wav)
+    duration = media_duration(wav)
+    loudness = measure_loudness(wav)
+    silences = detect_silences(wav, loudness, duration)
+    clips = speech_clips(silences, duration)
+    words = flatten_words(run_whisper(wav, work, args.language, args.model, clips))
+    if not words:
+        sys.exit("No speech found in the video.")
+    (work / "words.json").write_text(json.dumps(words, ensure_ascii=False))
+    (work / "audio.json").write_text(json.dumps({"loudness": loudness, "silences": silences}))
+    print_transcript(words)
+    print(f"\n{len(words)} words, {len(clips)} speech stretches → {work / 'words.json'}")
+
+
+if __name__ == "__main__":
+    main()

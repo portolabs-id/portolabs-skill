@@ -1,0 +1,46 @@
+# plan.json
+
+Every time position is a **word index** from the transcript (`[index]word`). The builder converts it to output time after pauses and dropped takes are cut. A referenced word must be inside `keep`, or the build stops and names it. Relative paths resolve from the plan's folder.
+
+```json
+{
+  "name": "Remote kerja - Dicoding",
+  "aroll": "/Users/me/Videos/aroll.MOV",
+  "words": "words.json",
+  "keep": [[28, 43], [44, 67], [136, 149], [82, 99]],
+  "word_fixes": {"169": "Della", "252": "Dicoding."},
+
+  "hook": {"text": "Bidang ini buka banyak posisi kerja remote", "highlight": "Gw saksinya!", "until_word": 43},
+  "broll": [
+    {"file": "/Users/me/Videos/laptop.mp4", "from_word": 30, "to_word": 33},
+    {"file": "/Users/me/Videos/kantor.mp4", "from_word": 34, "to_word": 43, "src_start": 12.5}
+  ],
+  "cards": [
+    {"style": "fullscreen", "text": "100% full beasiswa\nbelajar Coding dan AI", "from_word": 175, "to_word": 180},
+    {"style": "overlay", "text": "Terbuka untuk umum untuk peserta di atas 18 tahun", "from_word": 302, "to_word": 311}
+  ],
+  "posters": [{"file": "/Users/me/Videos/poster.jpg", "from_word": 225, "to_word": 231}],
+  "logos": [{"title": "Kolaborasi antara", "files": ["logo-a.mp4", "logo-b.mp4"], "chroma": true, "from_word": 245, "to_word": 252}],
+  "clicks": [272, 274, 277],
+  "punch_in": [324],
+  "cta": {"text": "daftar di link berikut\ndicoding.id/arcade-7", "from_word": 326},
+  "credit": "Della Miranti"
+}
+```
+
+| Field | Required | Meaning |
+|---|---|---|
+| `name` | yes | Draft name in CapCut. A number is added if it already exists. |
+| `aroll` | yes | The talking-head video. |
+| `words` | yes | `words.json` from `transcribe.py`. Its `audio.json` must sit next to it. |
+| `keep` | yes | Inclusive `[first, last]` word ranges, in video order. Anything not listed is cut. |
+| `word_fixes` | no | `{index: "text"}` corrections for subtitles. |
+| `hook` | no | Top title from 0 s until `until_word` ends. `highlight` is a second line in yellow. Adds the opening woosh, plus a Glare II transition and swish where the hook ends. |
+| `broll` | no | Replaces the picture from `from_word` to `to_word`. `src_start` (seconds into the clip) is optional; the default is the middle of the clip. A clip shorter than its span ends early. |
+| `cards` | no | `fullscreen`: black textured background with ART PAPER text. `overlay`: the same text over the blurred A-roll. Both pop in with a "pop" SFX. Use `\n` for a line break. |
+| `posters` | no | Image or video floating over the blurred A-roll, Shake Down in, with a click. |
+| `logos` | no | Each group: optional `title` text, then the logos staggered in from the right, each with a click. Set `chroma` to false for plain images. |
+| `clicks` | no | Words that get a mouse-click SFX, e.g. each item of a spoken list. |
+| `punch_in` | no | Words that get a fast zoom-in and a swish: the punchline, the CTA. |
+| `cta` | no | Black text in a white box from `from_word` to the end (or `to_word`). |
+| `credit` | no | Creator name for the "Original content from …" watermark that moves corners. |

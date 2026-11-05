@@ -1,28 +1,35 @@
 ---
 name: explainer-reel
-description: Use when making a vertical explainer reel from a topic in the clean grid style (word-by-word captions with blue selection boxes, a progress rail, UI cards, real logos and screenshots), voiced with ElevenLabs and delivered as a CapCut draft, e.g. "bikin reel explainer", "bikin konten reel tentang X", "riset terus bikin script, motion, dubbing", "reel kayak mrcreates", or a topic plus reference reel links.
+description: Use when making a vertical explainer reel (30–90 s) from a topic: trend research, hooks and script first, then, once the user approves, an ElevenLabs voice, real logos and screenshots and HyperFrames motion in the clean grid style, delivered as a CapCut draft. E.g. "bikin reel explainer", "bikin konten reel tentang X", "riset tren terus bikin hook dan script", "reel kayak mrcreates", or a topic plus reference reel links.
 ---
 
 # Explainer reel
 
 ## Overview
 
-A topic becomes a 60–90 s vertical reel in four steps. Each step ends with something the user
-sees before the next one starts:
+A topic becomes a 30–90 s vertical reel in two stages:
 
-1. **Research** → `research.md`: the angle, hook options, facts with their sources.
-2. **Script** → `script.json`, approved by the user. Nothing is voiced before that: voice costs credits.
+**Pre-production** (talk and documents, nothing costs money):
+1. **Research** → `trends.md` and `research.md`: what is trending, the angle, facts with sources.
+2. **Script** → `brief.md`: hook options, the script beat by beat with its visuals and length.
+
+**Gate: show the brief and wait.** Do not run anything from step 3 (no voice, no assets, no
+render) until the user picks a hook and says go ("jalan", "gas", "oke produksi"). Revise the
+brief as often as they ask.
+
+**Production:**
 3. **Produce** → ElevenLabs voice, word timing, logos and screenshots, motion rendered with HyperFrames.
 4. **Assemble** → a CapCut draft (motion, voice, SFX) and `preview.mp4`. The user adds music, exports, posts.
 
-The look and how to write scenes: [references/style.md](references/style.md). How the reference
-reel was analysed, and why HyperFrames: [references/reference-analysis.md](references/reference-analysis.md).
+Hooks, length and the brief: [references/script.md](references/script.md). The look and how to
+write scenes: [references/style.md](references/style.md). How the reference reel was analysed,
+and why HyperFrames: [references/reference-analysis.md](references/reference-analysis.md).
 
 **Say so when a step needs something this skill cannot do:**
 
 | Cannot | Instead |
 |---|---|
-| Instagram insights, trending audio | the user checks them in the app |
+| Instagram and TikTok search, insights, trending audio (they need a login) | trends from Google Trends and YouTube, plus reels the user links |
 | Pages behind a login or a bot check (Cloudflare): no screenshot | a public page, or the user's own screenshot in the brand kit |
 | A logo whose site gives only a blurry icon and Simple Icons lacks | the official file in the brand kit |
 | Licensed music | the user picks it from CapCut's library |
@@ -43,22 +50,35 @@ temporary folder. `<skill>` is this skill's folder; `<capcut>` is `capcut-auto-e
 
 ## 1. Research
 
-1. Settle the topic and who it is for with the user, in one question if it is unclear.
-2. Facts: WebSearch and WebFetch, primary sources first. Every number or claim gets its source.
-3. Reference reels, when the user gives links. Downloading reads their browser's login cookies, so
-   ask first, and say macOS will ask for keychain access:
+1. Settle the topic, who it is for and what they should do after watching, in one question if
+   any of it is unclear.
+2. **Trends:** 2–4 keywords for the niche, in the words viewers search:
+   ```bash
+   uv run <skill>/scripts/trend_scan.py <work> "<keyword>" "<keyword>"
+   ```
+   `trends.md` lists today's Google Trends in Indonesia and, per keyword, the most viewed short
+   videos uploaded this month. Read it for what is rising, which angles get views, and how the top
+   titles hook. A Google trend that touches the topic is a reason to make the reel now.
+3. **Facts:** WebSearch and WebFetch, primary sources first. Every number or claim gets its source.
+4. **Reference reels**, when the user gives links. Downloading reads their browser's login cookies,
+   so ask first, and say macOS will ask for keychain access:
    ```bash
    uv run <skill>/scripts/download_reference.py "<url>" <work>/refs --browser chrome
    ```
    Dia and Arc: `--chromium-dir "~/Library/Application Support/Dia/User Data" --keyring Dia`.
-   Then study it as in `reference-analysis.md`: transcript (`mlx_whisper`), a 1 fps contact sheet, cuts, loudness.
-4. Write `<work>/research.md`: the angle, three hook options, 5–8 facts with sources, notes from the references.
+   Then study it as in `reference-analysis.md`: hook, transcript (`mlx_whisper`), a 1 fps contact
+   sheet, pace, loudness.
+5. Write `<work>/research.md`: the angle and why now, 5–8 facts with sources, what the references
+   and the trending titles do in their first three seconds.
 
 ## 2. Script
 
-Structure: **hook** (a problem, a number, a promise of time) → **numbered beats**, one action and one
-visual each → **recap** → **one thesis line** → **CTA** (one action). About 200–300 words for 60–90 s.
-Spoken Indonesian; names spelt as they should appear on screen (the words on screen are the script's).
+Follow [references/script.md](references/script.md): pick the length from the idea (30–90 s,
+about 150 words a minute), write five hook options from different patterns, then the beats, one
+action and one visual each, and one CTA. Write `<work>/brief.md`, show it in chat as plain text,
+ask which hook and what to change. **Stop here until the user says go.**
+
+After the go, write `<work>/script.json` from the chosen hook and the brief's table:
 
 ```json
 {"title": "Lima tool buat edit reel",
@@ -73,9 +93,7 @@ Spoken Indonesian; names spelt as they should appear on screen (the words on scr
 - `sel` and `em` are words of that beat's `vo`, spelt exactly as there, punctuation included (style.md, Captions).
 - `assets`: what the beat shows, in `fetch_assets.py`'s format: a logo by `domain` and Simple Icons
   slug `logo`, or a `screenshot` URL.
-
-Show the user the script as plain text, beat by beat, with the visual idea of each beat and the
-estimated length. **Wait for their approval.** Save it as `<work>/script.json`.
+- The words of `vo` are the brief's, unchanged: the user approved them.
 
 ## 3. Produce
 

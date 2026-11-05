@@ -39,6 +39,9 @@ def main():
                         "--non-interactive", "--skip-skills"], cwd=work, env=env, check=True, capture_output=True)
     if (work / "assets").exists():
         shutil.copytree(work / "assets", project / "assets", dirs_exist_ok=True)
+    for extra in TEMPLATE.parent.iterdir():  # the mascot and anything else the template draws
+        if extra.name != TEMPLATE.name:
+            shutil.copy(extra, project / extra.name)
 
     html = TEMPLATE.read_text()
     index = project / "index.html"

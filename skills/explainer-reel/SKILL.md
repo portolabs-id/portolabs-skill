@@ -21,7 +21,7 @@ brief as often as they ask.
 3. **Produce** → ElevenLabs voice, word timing, logos and screenshots, motion rendered with HyperFrames.
 4. **Assemble** → a CapCut draft (motion, voice, SFX) and `preview.mp4`. The user adds music, exports, posts.
 
-Hooks, length and the brief: [references/script.md](references/script.md). The look and how to
+Storytelling (structures, hooks, voice, the brief): [references/script.md](references/script.md). The look and how to
 write scenes: [references/style.md](references/style.md). How the reference reel was analysed,
 and why HyperFrames: [references/reference-analysis.md](references/reference-analysis.md).
 
@@ -73,9 +73,10 @@ temporary folder. `<skill>` is this skill's folder; `<capcut>` is `capcut-auto-e
 
 ## 2. Script
 
-Follow [references/script.md](references/script.md): pick the length from the idea (30–90 s,
-about 150 words a minute), write five hook options from different patterns, then the beats, one
-action and one visual each, and one CTA. Write `<work>/brief.md`, show it in chat as plain text,
+Build the story with [references/script.md](references/script.md), in its order: the one idea
+and the shift it makes, the length (30–90 s, about 150 words a minute), a structure that fits,
+five hooks from different patterns, beats with tension and payoff, the voice, sources, one CTA.
+Run its checklist and fix what fails. Write `<work>/brief.md`, show it in chat as plain text, and
 ask which hook and what to change. **Stop here until the user says go.**
 
 After the go, write `<work>/script.json` from the chosen hook and the brief's table:

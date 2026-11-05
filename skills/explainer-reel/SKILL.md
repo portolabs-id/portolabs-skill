@@ -102,7 +102,10 @@ After the go, write `<work>/script.json` from the chosen hook and the brief's ta
    ```bash
    python3 <skill>/scripts/tts.py <work>/script.json <work>
    ```
-   Writes `voice.mp3`, `voice.mp4`, `words.json`, `audio.json`, `beats.json` and a starting `plan.json`.
+   Writes `voice_raw.mp3` (as ElevenLabs returned it), `voice.mp3`, `voice.mp4`, `words.json`,
+   `audio.json`, `beats.json` and a starting `plan.json`. `voice.mp3` is already mastered (high-pass,
+   light compression, -14 LUFS under -1.5 dBTP), and everything after it is measured from it: never
+   master or replace the voice later, or the cuts drift from the motion.
    Tell the user `voice.mp3` is ready to listen to; a wrong pronunciation is fixed by respelling the
    word in `vo` and voicing again.
 2. **Timing:** pauses over 0.3 s are cut, so the motion is timed from the edit, not from the voice:

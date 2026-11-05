@@ -16,13 +16,14 @@ The whole script is one request, so the voice flows across beats. ElevenLabs ret
 character is spoken; the words are the script's own, so names are never misheard.
 
 Writes into <work_dir>:
-  voice.mp3    the voice
-  voice.mp4    the voice on a plain frame, the "A-roll" capcut-auto-edit's build_draft.py expects
-  words.json   [{"i", "w", "s", "e"}] in the format transcribe.py writes
-  audio.json   loudness and silences, as transcribe.py writes them
-  beats.json   [{"id", "chip", "from_word", "to_word", "sel": [i], "em": [i]}]
-  plan.json    a starting plan for build_draft.py: every word kept, no yellow captions, no grading,
-               each beat covered by motion.mp4 locked to the timeline
+  voice_raw.mp3  the voice as ElevenLabs returned it
+  voice.mp3      the voice mastered to -14 LUFS under -1.5 dBTP; everything below comes from it
+  voice.mp4      the voice on a plain frame, the "A-roll" capcut-auto-edit's build_draft.py expects
+  words.json     [{"i", "w", "s", "e"}] in the format transcribe.py writes
+  audio.json     loudness, silences and peaks, as transcribe.py writes them
+  beats.json     [{"id", "chip", "from_word", "to_word", "sel": [i], "em": [i]}]
+  plan.json      a starting plan for build_draft.py: every word kept, no yellow captions, no grading,
+                 each beat covered by motion.mp4 locked to the timeline
 """
 import argparse
 import base64
@@ -35,8 +36,8 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "capcut-auto-edit" / "scripts"))
-from transcribe import (SILENCE_BELOW_SPEECH_DB, WINDOW, extract_audio, measure_loudness,  # noqa: E402
-                        media_duration, silences_from_levels, window_levels)
+from transcribe import (SILENCE_BELOW_SPEECH_DB, WINDOW, extract_audio, ffmpeg_filter_log,  # noqa: E402
+                        measure_loudness, media_duration, silences_from_levels, window_levels, window_peaks)
 
 API = "https://api.elevenlabs.io/v1"
 DEFAULT_MODEL = "eleven_v4"
@@ -48,6 +49,10 @@ FRAME_SIZE = "1080x1920"
 FRAME_RATE = 60
 # The closing card stays this long after the last word, so the CTA can be read.
 END_HOLD = 2.0
+# The voice is mastered once, here, before anything is timed or measured from it.
+VOICE_CLEANUP = "highpass=f=80,acompressor=threshold=-20dB:ratio=3:attack=10:release=150:makeup=2"
+LOUDNORM = "loudnorm=I=-14:TP=-1.5:LRA=7"
+VOICE_RATE = 44100
 
 
 def api_key():
@@ -106,6 +111,21 @@ def starting_plan(title, words, beats):
                        "src_start": "timeline"} for b in beats]}
 
 
+def master_voice(raw, out):
+    """ElevenLabs speaks at about -22 LUFS with peaks near -1.6 dBFS; raised to -14 LUFS later, in
+    CapCut, it clipped. Cleaned and lightly compressed, the voice goes to -14 LUFS under -1.5 dBTP
+    with two-pass loudnorm: one linear gain when its peaks allow it, else loudnorm rides the gain
+    itself. Either way every sample stays where it was, so the words keep their times."""
+    chain = f"{VOICE_CLEANUP},{LOUDNORM}"
+    log = ffmpeg_filter_log(raw, f"{chain}:print_format=json")
+    m = json.loads(log[log.rindex("{"):log.rindex("}") + 1])
+    measured = (f"measured_I={m['input_i']}:measured_TP={m['input_tp']}:measured_LRA={m['input_lra']}"
+                f":measured_thresh={m['input_thresh']}:offset={m['target_offset']}")
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(raw),
+                    "-af", f"{chain}:{measured}:linear=true,aresample={VOICE_RATE}",
+                    "-c:a", "libmp3lame", "-b:a", "192k", str(out)], check=True)
+
+
 def voice_video(mp3, mp4):
     # ponytail: build_draft.py expects a talking-head video; motion covers the whole frame, so a
     # plain frame carries the voice. Give build_draft.py an audio-only input if this ever shows.
@@ -120,7 +140,8 @@ def audio_analysis(mp4, work):
     extract_audio(mp4, wav)
     loudness, levels = measure_loudness(wav), window_levels(wav)
     silences = silences_from_levels(levels, loudness + SILENCE_BELOW_SPEECH_DB, media_duration(wav))
-    return {"loudness": loudness, "silences": silences, "window": WINDOW, "levels": [round(v, 1) for v in levels]}
+    return {"loudness": loudness, "silences": silences, "window": WINDOW, "levels": [round(v, 1) for v in levels],
+            "peaks": [round(v, 1) for v in window_peaks(mp4)]}
 
 
 def list_voices():
@@ -155,7 +176,8 @@ def main():
     words = words_from_alignment(result["alignment"])
     if len(words) != beats[-1]["to_word"] + 1:
         sys.exit(f"ElevenLabs timed {len(words)} words, the script has {beats[-1]['to_word'] + 1}")
-    (work / "voice.mp3").write_bytes(base64.b64decode(result["audio_base64"]))
+    (work / "voice_raw.mp3").write_bytes(base64.b64decode(result["audio_base64"]))
+    master_voice(work / "voice_raw.mp3", work / "voice.mp3")
     voice_video(work / "voice.mp3", work / "voice.mp4")
     (work / "words.json").write_text(json.dumps(words, ensure_ascii=False))
     (work / "audio.json").write_text(json.dumps(audio_analysis(work / "voice.mp4", work)))

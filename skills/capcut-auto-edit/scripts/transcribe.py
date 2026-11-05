@@ -5,7 +5,8 @@ Usage: transcribe.py <video> <work_dir> [--language id] [--model REPO]
 
 Writes into <work_dir>:
   words.json  [{"i", "w", "s", "e"}]  words with source-time seconds
-  audio.json  {"loudness", "silences", "window", "levels"} used by build_draft.py to cut pauses
+  audio.json  {"loudness", "silences", "window", "levels", "peaks"} used by build_draft.py to cut pauses
+              and set the speech volume
 and prints an indexed transcript. Pauses longer than 0.3 s show as ‖<sec>.
 
 Each stretch of speech between silences is transcribed on its own, so repeated takes
@@ -26,6 +27,7 @@ SILENCE_MIN = 0.15
 NOISE_BLIP = 0.12
 WINDOW = 0.02
 SAMPLE_RATE = 16000
+PEAK_RATE = 48000
 DEFAULT_LUFS = -20.0
 # Every pause the edit cuts (build_draft MAX_GAP) also splits whisper's clips: inside one clip
 # whisper tidies a retake away ("bisa banget, bisa banget daftar" → "bisa banget daftar").
@@ -41,8 +43,8 @@ def extract_audio(video, wav):
                     "-af", "aresample=async=1:first_pts=0", str(wav)], check=True)
 
 
-def ffmpeg_filter_log(wav, audio_filter):
-    return subprocess.run(["ffmpeg", "-nostats", "-i", str(wav), "-af", audio_filter, "-f", "null", "-"],
+def ffmpeg_filter_log(media, audio_filter):
+    return subprocess.run(["ffmpeg", "-nostats", "-i", str(media), "-vn", "-af", audio_filter, "-f", "null", "-"],
                           capture_output=True, text=True).stderr
 
 
@@ -59,10 +61,22 @@ def media_duration(path):
 
 def window_levels(wav):
     """RMS level (dB) of each WINDOW-long slice of the 16 kHz WAV."""
-    log = ffmpeg_filter_log(wav, f"asetnsamples=n={round(SAMPLE_RATE * WINDOW)}:p=0,"
-                                 "astats=metadata=1:reset=1:measure_perchannel=none:measure_overall=RMS_level,"
-                                 "ametadata=print:key=lavfi.astats.Overall.RMS_level")
-    return [float(v) if v != "-inf" else -120.0 for v in re.findall(r"RMS_level=(\S+)", log)]
+    return _window_stat(wav, "RMS_level", SAMPLE_RATE)
+
+
+def window_peaks(media):
+    """Sample peak (dBFS) of each WINDOW-long slice of the media's loudest channel, on extract_audio's
+    clock. Read from the media itself: the 16 kHz mono WAV loses the highs and averages the
+    channels, so its peaks read low, while CapCut plays (and clips) the media's own sound."""
+    return _window_stat(media, "Peak_level", PEAK_RATE)
+
+
+def _window_stat(media, stat, rate):
+    log = ffmpeg_filter_log(media, f"aresample={rate}:async=1:first_pts=0,"
+                                   f"asetnsamples=n={round(rate * WINDOW)}:p=0,"
+                                   f"astats=metadata=1:reset=1:measure_perchannel=none:measure_overall={stat},"
+                                   f"ametadata=print:key=lavfi.astats.Overall.{stat}")
+    return [float(v) if v != "-inf" else -120.0 for v in re.findall(rf"{stat}=(\S+)", log)]
 
 
 def detect_silences(wav, loudness, duration):
@@ -162,7 +176,8 @@ def main():
         sys.exit("No speech found in the video.")
     (work / "words.json").write_text(json.dumps(words, ensure_ascii=False))
     (work / "audio.json").write_text(json.dumps({"loudness": loudness, "silences": silences, "window": WINDOW,
-                                                 "levels": [round(v, 1) for v in levels]}))
+                                                 "levels": [round(v, 1) for v in levels],
+                                                 "peaks": [round(v, 1) for v in window_peaks(args.video)]}))
     print_transcript(words)
     print(f"\n{len(words)} words, {len(clips)} speech stretches → {work / 'words.json'}")
 

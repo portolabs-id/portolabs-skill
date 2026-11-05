@@ -1,12 +1,13 @@
 """Self-check for the pace logic: python3 scripts/test_build_draft.py"""
 import copy
 import json
+import math
 import subprocess
 import tempfile
 from pathlib import Path
 
 from build_draft import (TEMPLATE_DIR, PROTO, SpeechTimeline, caption_chunks, kept_loudness, resolve_text_layout,
-                         silences_for_kept, text_box, write_project)
+                         silences_for_kept, speech_gain, text_box, write_project)
 
 TEMPLATE = json.loads((TEMPLATE_DIR / "draft_info.json").read_text())
 TEXT_MATERIALS = {m["id"]: m for m in TEMPLATE["materials"]["texts"]}
@@ -112,6 +113,16 @@ def test_speech_gain_follows_the_kept_speech_not_the_whole_file():
     audio = {"window": 0.02, "levels": levels, "loudness": -32.0, "silences": []}
     w = [{"i": 0, "w": "halo", "s": 0.0, "e": 1.0}]
     assert abs(kept_loudness(audio, w, [[0, 0]]) - (-20.0)) < 0.5
+
+
+def test_speech_gain_stops_where_the_kept_peaks_reach_the_ceiling():
+    """An ElevenLabs voice at -22.4 LUFS peaks at -1.6 dBFS: +7 dB to -14 LUFS clipped in CapCut.
+    A louder peak outside the kept words does not hold the voice back."""
+    levels = [-22.4] * 50 + [-80.0] * 50 + [-20.0] * 50
+    peaks = [-1.6] * 50 + [-80.0] * 50 + [-0.1] * 50
+    audio = {"window": 0.02, "levels": levels, "peaks": peaks, "loudness": -22.4, "silences": []}
+    w = [{"i": 0, "w": "halo", "s": 0.0, "e": 1.0}, {"i": 1, "w": "lagi", "s": 2.0, "e": 3.0}]
+    assert abs(20 * math.log10(speech_gain(audio, w, [[0, 0]])) - 0.6) < 0.01
 
 
 def test_text_box_matches_capcut_render_of_the_0827_hook():

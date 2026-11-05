@@ -29,6 +29,7 @@ BLACK_TEXTURE = "materials/black_texture.jpeg"
 FPS = 60
 SEC = 1_000_000
 CANVAS_W, CANVAS_H = 1080, 1920
+DEFAULT_TIMELINE_NAME = "Timeline 01"
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".bmp"}
 # broll src_start value for a clip rendered on the output timeline (motion graphics): every
 # moment of the clip plays at the same time it has in the edit, wherever the cover lands.
@@ -1012,31 +1013,47 @@ def unique_dir(root, name):
     return candidate
 
 
-def write_draft(data, draft_dir, name, duration, cover_source, cover_time, canvas=(CANVAS_W, CANVAS_H)):
-    shutil.copytree(TEMPLATE_DIR, draft_dir)
-    old_timeline = data["id"]
-    new_timeline = uid()
-    data["id"] = new_timeline
-    (draft_dir / "Timelines" / old_timeline).rename(draft_dir / "Timelines" / new_timeline)
-    for rel in ("Timelines/project.json", "timeline_layout.json"):
-        p = draft_dir / rel
-        p.write_text(p.read_text().replace(old_timeline, new_timeline))
-    project = json.loads((draft_dir / "Timelines/project.json").read_text())
-    project["id"] = uid()
-    (draft_dir / "Timelines/project.json").write_text(json.dumps(project))
+def write_draft(data, draft_dir, name, cover_source, cover_time, canvas=(CANVAS_W, CANVAS_H)):
+    write_project([(DEFAULT_TIMELINE_NAME, data)], draft_dir, name, cover_source, cover_time, canvas)
 
-    data["static_cover_image_path"] = str(draft_dir / "draft_cover.jpg")
-    text = json.dumps(data, ensure_ascii=False)
-    text = re.sub(r"##_draftpath_placeholder_[0-9A-Fa-f-]+_##", str(draft_dir).replace("\\", "/"), text)
-    for target in (draft_dir / "draft_info.json", draft_dir / "Timelines" / new_timeline / "draft_info.json"):
-        target.write_text(text)
+
+def write_project(timelines, draft_dir, name, cover_source, cover_time, canvas=(CANVAS_W, CANVAS_H)):
+    """One CapCut project holding several timelines, given as [(timeline name, draft data)].
+    The first is the main timeline: CapCut opens it first, and the project's own draft_info.json,
+    cover and length are its."""
+    shutil.copytree(TEMPLATE_DIR, draft_dir)
+    timelines_dir = draft_dir / "Timelines"
+    project = json.loads((timelines_dir / "project.json").read_text())
+    proto_entry = project["timelines"][0]
+    proto_dir = timelines_dir / proto_entry["id"]
+    now = int(time.time() * SEC)
+    project["timelines"] = []
+    texts = []
+    for title, data in timelines:
+        data["id"] = uid()
+        shutil.copytree(proto_dir, timelines_dir / data["id"])
+        project["timelines"].append(dict(proto_entry, id=data["id"], name=title, create_time=now, update_time=now))
+        data["static_cover_image_path"] = str(draft_dir / "draft_cover.jpg")
+        text = json.dumps(data, ensure_ascii=False)
+        text = re.sub(r"##_draftpath_placeholder_[0-9A-Fa-f-]+_##", str(draft_dir).replace("\\", "/"), text)
+        (timelines_dir / data["id"] / "draft_info.json").write_text(text)
+        texts.append(text)
+    shutil.rmtree(proto_dir)
+    main = project["timelines"][0]["id"]
+    project.update(id=uid(), main_timeline_id=main, create_time=now, update_time=now)
+    (timelines_dir / "project.json").write_text(json.dumps(project, ensure_ascii=False))
+    layout = json.loads((draft_dir / "timeline_layout.json").read_text())
+    layout["dockItems"][0].update(timelineIds=[t["id"] for t in project["timelines"]],
+                                  timelineNames=[t["name"] for t in project["timelines"]])
+    (draft_dir / "timeline_layout.json").write_text(json.dumps(layout, ensure_ascii=False))
+    (draft_dir / "draft_info.json").write_text(texts[0])
 
     cover = draft_dir / "draft_cover.jpg"
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{cover_time:.3f}", "-i", str(cover_source),
                     "-frames:v", "1", "-vf",
                     "scale={0}:{1}:force_original_aspect_ratio=increase,crop={0}:{1}".format(*canvas),
                     str(cover)], check=True)
-    shutil.copy(cover, draft_dir / "Timelines" / new_timeline / "draft_cover.jpg")
+    shutil.copy(cover, timelines_dir / main / "draft_cover.jpg")
 
     now = int(time.time() * SEC)
     meta = json.loads((draft_dir / "draft_meta_info.json").read_text())
@@ -1048,7 +1065,7 @@ def write_draft(data, draft_dir, name, duration, cover_source, cover_time, canva
     meta.update(draft_id=uid(), draft_name=name, draft_fold_path=str(draft_dir),
                 draft_root_path=str(draft_dir.parent), draft_cover="draft_cover.jpg",
                 draft_cloud_last_action_download=False, tm_draft_create=now, tm_draft_modified=now,
-                tm_duration=us(duration), draft_timeline_materials_size_=0)
+                tm_duration=timelines[0][1]["duration"], draft_timeline_materials_size_=0)
     (draft_dir / "draft_meta_info.json").write_text(json.dumps(meta, ensure_ascii=False))
     store = json.loads((draft_dir / "draft_virtual_store.json").read_text())
     for group in store["draft_virtual_store"]:
@@ -1162,7 +1179,7 @@ def main():
         render_tail_sheets(editor, shots, tails_dir)
         return
     first_piece = editor.speech.pieces[0]
-    write_draft(data, draft_dir, draft_dir.name, editor.T, editor.aroll, first_piece["src_start"] + 0.5)
+    write_draft(data, draft_dir, draft_dir.name, editor.aroll, first_piece["src_start"] + 0.5)
     print(f"\nDraft written: {draft_dir}\nCapCut lists it on its home screen (restart CapCut if it does not appear).")
 
 

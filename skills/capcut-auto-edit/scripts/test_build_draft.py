@@ -1,9 +1,12 @@
 """Self-check for the pace logic: python3 scripts/test_build_draft.py"""
 import copy
 import json
+import subprocess
+import tempfile
+from pathlib import Path
 
 from build_draft import (TEMPLATE_DIR, PROTO, SpeechTimeline, caption_chunks, kept_loudness, resolve_text_layout,
-                         silences_for_kept, text_box)
+                         silences_for_kept, text_box, write_project)
 
 TEMPLATE = json.loads((TEMPLATE_DIR / "draft_info.json").read_text())
 TEXT_MATERIALS = {m["id"]: m for m in TEMPLATE["materials"]["texts"]}
@@ -145,6 +148,22 @@ def test_captions_attach_suffixes_and_percent():
     chunks = caption_chunks([(0, "tim", 0, .2), (1, "IT", .2, .4), (2, "-nya", .4, .5),
                              (3, "100", .6, .8), (4, "%", .8, .9), (5, "gratis.", .9, 1.2)])
     assert [c[0] for c in chunks] == ["tim IT-nya 100%", "gratis"]
+
+
+def test_project_holds_every_timeline_and_opens_the_first():
+    with tempfile.TemporaryDirectory() as tmp:
+        cover = Path(tmp, "cover.mp4")
+        subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=s=64x64:d=1", str(cover)], check=True)
+        project_dir = Path(tmp, "project")
+        write_project([("Reel A", copy.deepcopy(TEMPLATE)), ("Reel B", copy.deepcopy(TEMPLATE))],
+                      project_dir, "project", cover, 0.5)
+        project = json.loads((project_dir / "Timelines/project.json").read_text())
+        layout = json.loads((project_dir / "timeline_layout.json").read_text())["dockItems"][0]
+        ids = [t["id"] for t in project["timelines"]]
+        folders = sorted(p.name for p in (project_dir / "Timelines").iterdir() if p.is_dir())
+        main = json.loads((project_dir / "draft_info.json").read_text())["id"]
+        assert (layout["timelineIds"], layout["timelineNames"], folders, project["main_timeline_id"], main) == \
+               (ids, ["Reel A", "Reel B"], sorted(ids), ids[0], ids[0])
 
 
 if __name__ == "__main__":

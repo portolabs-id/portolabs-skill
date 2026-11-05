@@ -135,7 +135,7 @@ class Lesson:
             local = self.draft_dir / media["path"].name
             self.draft.by_id[media["material"]]["path"] = str(local)
             self.draft.by_id[media["audio"]]["path"] = str(local)
-        write_draft(data, self.draft_dir, self.draft_dir.name, self.T, self.video, first + 1.0, canvas=CANVAS)
+        write_draft(data, self.draft_dir, self.draft_dir.name, self.video, first + 1.0, canvas=CANVAS)
         for media in self.stings.values():
             shutil.copy(media["path"], self.draft_dir / media["path"].name)
 

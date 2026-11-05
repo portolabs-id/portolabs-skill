@@ -20,6 +20,7 @@ The repo is private, so your GitHub login (`gh auth login`) must have access to 
 | `portolabs:classmate-import` | Turning a Google Drive folder of MP4s into a Classmate with ordered lessons grouped into modules, through Chrome and the Strapi admin. |
 | `portolabs:capcut-auto-edit` | Turning a raw talking-head video into a CapCut draft in the "0827" promo style: pauses and retakes cut, subtitles, B-roll, cards, poster, logos, SFX and grading. macOS only; needs CapCut, `ffmpeg` and `mlx_whisper`. |
 | `portolabs:capcut-asmr-edit` | Turning a long raw process video (laptop/PC service, cleaning, repair) into several short satisfying reels as CapCut drafts over a background song. macOS only; needs CapCut and `ffmpeg`, and `capcut-auto-edit` next to it. |
+| `portolabs:explainer-reel` | Turning a topic into a 30–90 s vertical explainer reel in the clean grid style: trend research, hooks and script approved first, then ElevenLabs voice, real logos and screenshots, HyperFrames motion, delivered as a CapCut draft. macOS only; needs CapCut, `ffmpeg`, `uv`, Node 22+, Chrome, an ElevenLabs key, and `capcut-auto-edit` next to it. |
 
 ## Adding a skill
 

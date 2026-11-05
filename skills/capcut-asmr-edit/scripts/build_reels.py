@@ -105,7 +105,7 @@ class Reel:
         seg["volume"] = 0.0
         seg["clip"]["scale"] = {"x": scale, "y": scale}
         seg["clip"]["transform"] = {"x": x, "y": 0.0}
-        seg["uniform_scale"] = {"on": True, "value": scale}
+        seg["uniform_scale"] = {"on": True, "value": 1.0}  # as CapCut writes it; see build_draft.emit_shot
         seg["common_keyframes"] = []
         d.place(lane, proto, seg)
 

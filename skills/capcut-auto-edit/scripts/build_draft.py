@@ -776,7 +776,9 @@ class Editor:
         scale = base * (amount if style == "punch" else 1.0)
         seg["clip"]["scale"] = {"x": scale, "y": scale}
         seg["clip"]["transform"] = {"x": 0.0, "y": 0.0}
-        seg["uniform_scale"] = {"on": True, "value": scale}
+        # CapCut itself always writes 1.0 here. Any other value squashes the height of a clip whose
+        # zoom is keyframed (ScaleX only): a 16:9 A-roll came out as a stretched strip.
+        seg["uniform_scale"] = {"on": True, "value": 1.0}
         if style == "slow":
             set_scale_keyframes(seg, [(0, base), (shot["end"] - shot["start"], base * amount)])
         elif style == "fast":

@@ -176,12 +176,15 @@ class SpeechTimeline:
     decides where speech starts, stops and pauses; the words only decide what is kept.
     """
 
-    def __init__(self, words, keep, media_duration, silences, trim_tail=None):
+    def __init__(self, words, keep, media_duration, silences, trim_tail=None, max_gap=MAX_GAP, kept_pause=0.0):
         """trim_tail: {word index: seconds} cut off the end of the piece that ends on that word,
-        for tails where the speaker already looks away (at the script) as the word finishes."""
+        for tails where the speaker already looks away (at the script) as the word finishes.
+        max_gap, kept_pause: a pause longer than max_gap shrinks to kept_pause (never below the pads)."""
         self.words = words
         self.silences = silences
         self.media_duration = media_duration
+        self.max_gap = max_gap
+        self.kept_pause = kept_pause
         self.kept = [i for start, end in keep for i in range(start, end + 1)]
         if not self.kept:
             sys.exit("plan.keep selects no words.")
@@ -280,10 +283,10 @@ class SpeechTimeline:
         ranges, cursor = [], start
         for s, e in self.silences:
             s, e = max(s, start), min(e, end)
-            if e - s <= MAX_GAP:
+            if e - s <= self.max_gap:
                 continue
-            cut_from = s + PAD_AFTER if s > start else start
-            cut_to = e - PAD_BEFORE if e < end else end
+            cut_from = s + max(PAD_AFTER, self.kept_pause / 2) if s > start else start
+            cut_to = e - max(PAD_BEFORE, self.kept_pause / 2) if e < end else end
             if cut_from > cursor:
                 ranges.append((cursor, cut_from))
             cursor = max(cursor, cut_to)
@@ -1009,7 +1012,7 @@ def unique_dir(root, name):
     return candidate
 
 
-def write_draft(data, draft_dir, name, duration, cover_source, cover_time):
+def write_draft(data, draft_dir, name, duration, cover_source, cover_time, canvas=(CANVAS_W, CANVAS_H)):
     shutil.copytree(TEMPLATE_DIR, draft_dir)
     old_timeline = data["id"]
     new_timeline = uid()
@@ -1031,7 +1034,7 @@ def write_draft(data, draft_dir, name, duration, cover_source, cover_time):
     cover = draft_dir / "draft_cover.jpg"
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{cover_time:.3f}", "-i", str(cover_source),
                     "-frames:v", "1", "-vf",
-                    f"scale={CANVAS_W}:{CANVAS_H}:force_original_aspect_ratio=increase,crop={CANVAS_W}:{CANVAS_H}",
+                    "scale={0}:{1}:force_original_aspect_ratio=increase,crop={0}:{1}".format(*canvas),
                     str(cover)], check=True)
     shutil.copy(cover, draft_dir / "Timelines" / new_timeline / "draft_cover.jpg")
 

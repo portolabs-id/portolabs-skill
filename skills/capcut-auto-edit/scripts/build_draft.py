@@ -1012,6 +1012,13 @@ def unique_dir(root, name):
     return candidate
 
 
+def timeline_text(data, draft_dir):
+    """A timeline's draft_info.json, with the template's draft-folder placeholders filled in."""
+    data["static_cover_image_path"] = str(draft_dir / "draft_cover.jpg")
+    text = json.dumps(data, ensure_ascii=False)
+    return re.sub(r"##_draftpath_placeholder_[0-9A-Fa-f-]+_##", str(draft_dir).replace("\\", "/"), text)
+
+
 def write_draft(data, draft_dir, name, duration, cover_source, cover_time, canvas=(CANVAS_W, CANVAS_H)):
     shutil.copytree(TEMPLATE_DIR, draft_dir)
     old_timeline = data["id"]
@@ -1025,9 +1032,7 @@ def write_draft(data, draft_dir, name, duration, cover_source, cover_time, canva
     project["id"] = uid()
     (draft_dir / "Timelines/project.json").write_text(json.dumps(project))
 
-    data["static_cover_image_path"] = str(draft_dir / "draft_cover.jpg")
-    text = json.dumps(data, ensure_ascii=False)
-    text = re.sub(r"##_draftpath_placeholder_[0-9A-Fa-f-]+_##", str(draft_dir).replace("\\", "/"), text)
+    text = timeline_text(data, draft_dir)
     for target in (draft_dir / "draft_info.json", draft_dir / "Timelines" / new_timeline / "draft_info.json"):
         target.write_text(text)
 

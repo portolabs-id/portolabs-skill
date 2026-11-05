@@ -1,19 +1,19 @@
 ---
 name: capcut-webinar-edit
-description: Use when cutting a long recorded webinar, live class or Zoom session (often 1–2 hours) into several lesson videos, one topic each, with the Portolabs intro and outro, as CapCut drafts for a classmate, e.g. "potong webinar ini jadi beberapa materi", "edit rekaman kelas jadi video classmate", "pecah zoom per materi", or a long .mp4 or Drive link of a webinar recording.
+description: Use when cutting a long recorded webinar, live class or Zoom session (often 1–2 hours) into several lesson videos, one topic each, with the Portolabs intro and outro, as a CapCut project for a classmate, e.g. "potong webinar ini jadi beberapa materi", "edit rekaman kelas jadi video classmate", "pecah zoom per materi", or a long .mp4 or Drive link of a webinar recording.
 ---
 
 # CapCut webinar lessons
 
 ## Overview
 
-One long webinar recording becomes one CapCut draft per lesson, at 1920x1080 and 30 fps: the Portolabs logo sting (8 s), the lesson, the sting again. **Only the material stays.** Chat, polls, waiting, QnA, promos and the closing are cut. Each lesson covers one topic, usually 2–20 minutes. The exported videos are what `classmate-import` turns into a classmate.
+One long webinar recording becomes one CapCut project with one timeline per lesson, at 1920x1080 and 30 fps: the Portolabs logo sting (8 s), the lesson, the sting again. **Only the material stays.** Chat, polls, waiting, QnA, promos and the closing are cut. Each lesson covers one topic, usually 2–20 minutes. The exported videos are what `classmate-import` turns into a classmate.
 
 Work split:
 - `capcut-auto-edit/scripts/transcribe.py` writes every word with its time, and the silences from the audio. It transcribes each stretch of speech on its own: one whisper run over a whole hour hallucinates for minutes ("Sampai Sampai Sampai…").
 - `capcut-asmr-edit/scripts/scan.py` makes contact sheets, so you see where the slides, the screen-share practice and the QnA are.
 - **You** map the recording, propose the lessons, wait for the user's OK, and write `plan.json` by word index.
-- `scripts/build_webinar.py` checks the plan and writes one draft per lesson. It cuts on the real audio, so no word is clipped, and shrinks pauses over 3 s to 1 s.
+- `scripts/build_webinar.py` checks the plan and writes the project, one timeline per lesson. It cuts on the real audio, so no word is clipped, and shrinks pauses over 3 s to 1 s.
 
 Requirements: macOS with CapCut, `ffmpeg` and `mlx_whisper` (`uv tool install mlx-whisper`). `capcut-auto-edit` and `capcut-asmr-edit` must sit next to this skill; they ship together in this plugin. Below, `<skills>` is the folder that holds all three.
 
@@ -50,8 +50,8 @@ Keep working files in a scratch folder (`<work>`), never inside the CapCut draft
    - every `WARNING` has a reason you can give the user (a lesson outside 2–20 min, the same words kept in two lessons);
    - every stretch in the `Not used` list (10 s or longer) is one you meant to drop. Material there means a range ends too early or starts too late.
 7. **Propose and wait.** Show the lessons as a table: `#`, title, each kept range as start–end in the recording (mark an added QnA answer "+ QnA"), minutes of material from the dry-run, and what it covers. Then list everything you drop, with its times and the reason. Ask: "Pembagian materi dan bagian yang dibuang ini sudah benar?" Build nothing until the user approves. Apply their edits to the plan and dry-run again.
-8. **Build.** Run the same command without `--dry-run`. Each lesson becomes a new draft named `#<n> <title>`; an existing draft is never overwritten (a number is added). CapCut picks new drafts up by itself; if one does not appear, the user restarts CapCut.
-9. **Report** each draft's name and length, and what was dropped. Tell the user: export each draft in CapCut at 1080p, put the MP4s in one Drive folder, and run `classmate-import` on it. The export file name is the draft name.
+8. **Build.** Run the same command without `--dry-run`. It writes one new project named after `name` in the plan, with one timeline per lesson named `#<n> <title>`, in lesson order. An existing project is never overwritten (a number is added). CapCut picks new projects up by itself; if it does not appear, the user restarts CapCut.
+9. **Report** the project name, each timeline's name and length, and what was dropped. Tell the user: open the project in CapCut, and for each timeline pick its tab above the player, then Export at 1080p. Put the MP4s in one Drive folder and run `classmate-import` on it.
 
 ## What stays, what goes
 
@@ -87,6 +87,7 @@ Relative paths resolve from the plan's folder. `keep` ranges are word indices fr
 
 ```json
 {
+  "name": "Canva Mini Class Day 1",
   "video": "/Users/me/Downloads/Canva Mini Class Day 1.mp4",
   "words": "words.json",
   "first_number": 1,
@@ -99,15 +100,16 @@ Relative paths resolve from the plan's folder. `keep` ranges are word indices fr
 
 | Field | Required | Meaning |
 |---|---|---|
+| `name` | no | CapCut project name (default: the recording's file name). |
 | `video` | yes | The webinar recording. |
 | `words` | no | `words.json` from `transcribe.py` (default `words.json`); `audio.json` must sit next to it. |
 | `first_number` | no | Number of the first lesson (default 1). |
-| `lessons[].title` | yes | Lesson title; the draft is named `#<n> <title>`. |
+| `lessons[].title` | yes | Lesson title; its timeline is named `#<n> <title>`. |
 | `lessons[].keep` | yes | `[[first word, last word], …]` in the order they play. |
 | `intro`, `outro` | no | Another video instead of the Portolabs sting in `assets/`. |
 
 ## Notes
 
-- The recording is linked by its path, not copied. Tell the user not to move or delete it until every lesson is exported. The stings are copied into each draft folder.
+- The recording is linked by its path, not copied. Tell the user not to move or delete it until every lesson is exported. The stings are copied into the project folder.
 - Cuts are plain cuts. There are no subtitles, texts or music.
 - The tuning constants (longest pause, kept pause, lesson length, canvas) sit at the top of `build_webinar.py`. Change them there, not per webinar.

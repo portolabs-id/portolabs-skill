@@ -1,18 +1,18 @@
 ---
 name: capcut-asmr-edit
-description: Use when turning a long raw process recording (laptop or PC service, cleaning, repair, restoration, often 30–60 min and often with no usable sound) into several short satisfying "ASMR" reels as CapCut drafts over a background song, e.g. "bikin reels ASMR dari video service ini", "potong jadi beberapa reels", "edit ASMR capcut", or a long .mp4 plus a song file.
+description: Use when turning a long raw process recording (laptop or PC service, cleaning, repair, restoration, often 30–60 min and often with no usable sound) into several short satisfying "ASMR" reels over a background song, as one CapCut project with a timeline per reel, e.g. "bikin reels ASMR dari video service ini", "potong jadi beberapa reels", "edit ASMR capcut", or a long .mp4 plus a song file.
 ---
 
 # CapCut ASMR reels
 
 ## Overview
 
-One long process video plus one song becomes several CapCut drafts at 1080x1920, 60 fps, each 15–60 s. Every draft holds the best moments of one part of the work, sped up where the action repeats. Each clip sits sharp in the middle over a blurred copy of itself, and a section of the song runs under it with a fade in and out. There is no text and no SFX: the picture and the song carry the reel.
+One long process video plus one song becomes one CapCut project with one timeline per reel, at 1080x1920, 60 fps, each reel 15–60 s. Every timeline holds the best moments of one part of the work, sped up where the action repeats. Each clip sits sharp in the middle over a blurred copy of itself, and a section of the song runs under it with a fade in and out. There is no text and no SFX: the picture and the song carry the reel.
 
 Work split:
 - `scripts/scan.py` makes contact sheets stamped with source times: a coarse pass over the whole video, then 1-second passes over the windows you pick.
 - **You** read the sheets, map the stages of the work, propose the reels, pick each moment to the second, and write `plan.json`.
-- `scripts/build_reels.py` checks the plan, renders preview sheets of exactly what each clip will show, and writes one draft per reel. It clones layers from the `capcut-auto-edit` template through that skill's draft writer, so both skills must sit side by side (they ship together in this plugin).
+- `scripts/build_reels.py` checks the plan, renders preview sheets of exactly what each clip will show, and writes the project. It clones layers from the `capcut-auto-edit` template through that skill's draft writer, so both skills must sit side by side (they ship together in this plugin).
 
 Requirements: macOS with CapCut, and `ffmpeg`. Check with `command -v ffmpeg`.
 
@@ -44,8 +44,8 @@ Keep working files in a scratch folder (`<work>`), never inside the CapCut draft
    - nothing changing from first to last frame (raise `speed` or pick another moment).
 
    Dry-run again until every row looks right.
-7. **Build.** Run the same command without `--dry-run`. Each reel becomes a new draft folder in CapCut's projects folder, named after the reel (a number is added if the name exists; nothing is overwritten). The song section is written into the draft folder as `bgm.m4a`. CapCut picks new drafts up by itself; if one does not appear, the user restarts CapCut.
-8. **Report** each draft's name and length, and the stages each reel covers. Offer changes ("hook-nya ganti", "reel kipas lebih pendek"): edit the plan and build again.
+7. **Build.** Run the same command without `--dry-run`. The plan becomes one new project in CapCut's projects folder, named after `name` (a number is added if the name exists; nothing is overwritten). Each reel is a timeline in it, named after the reel, in plan order; the first reel is the main timeline CapCut opens. Switch between them in CapCut's timeline tabs, and export each one on its own. Each reel's song section is written into the project folder as `bgm-<n>.m4a`. CapCut picks the new project up by itself; if it does not appear, the user restarts CapCut.
+8. **Report** the project's name, then each timeline's name and length, and the stages each reel covers. Offer changes ("hook-nya ganti", "reel kipas lebih pendek"): edit the plan and build again.
 
 ## Editing rules
 
@@ -63,6 +63,7 @@ Times are seconds in the source video. Relative paths resolve from the plan's fo
 
 ```json
 {
+  "name": "ASMR Service Asus",
   "video": "/Users/me/Downloads/service.mp4",
   "music": "/Users/me/Downloads/song.webm",
   "reels": [
@@ -79,9 +80,10 @@ Times are seconds in the source video. Relative paths resolve from the plan's fo
 
 | Field | Required | Meaning |
 |---|---|---|
+| `name` | no | Project name in CapCut. Default: `ASMR <video file name>`. |
 | `video` | yes | The long source video. Its own sound is muted. |
 | `music` | no | The song. Left out, the drafts have no audio track. |
-| `reels[].name` | yes | Draft name in CapCut. |
+| `reels[].name` | yes | Timeline name in the project. |
 | `reels[].music_start` | no | Where in the song the reel starts, in seconds (default 0, the intro). |
 | `reels[].music_volume` | no | Song volume, 1.0 by default. |
 | `clips[].at` | yes | Source time the clip starts at. |
@@ -93,5 +95,6 @@ Times are seconds in the source video. Relative paths resolve from the plan's fo
 ## Notes
 
 - The video is linked by its path, not copied. Tell the user not to move or delete it until the reels are exported.
+- A rebuild makes a new project; it does not update the old one. Tell the user to delete the old project in CapCut if it is no longer wanted.
 - Cuts are not timed to the song's beat.
 - The tuning constants (default zoom, fades, reel length bounds) sit at the top of `build_reels.py`. Change them there, not per video.

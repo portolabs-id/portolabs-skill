@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Build one CapCut draft per reel: picked moments of a long video over a background song.
+"""Build one CapCut project with a timeline per reel: picked moments of a long video over a background song.
 
 Usage: build_reels.py <plan.json> [--drafts-root DIR] [--dry-run]
 
 Layers are cloned from the capcut-auto-edit template, so they are prototypes CapCut already opens.
 Each clip sits sharp in the middle of the 1080x1920 canvas over a blurred, filled copy of itself.
-The song section is cut and faded with ffmpeg into the draft folder, so the draft owns its audio.
+Each reel's song section is cut and faded with ffmpeg into the project folder, so the project owns its audio.
 """
 import argparse
 import json
@@ -15,7 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "capcut-auto-edit" / "scripts"))
 from build_draft import (CANVAS_H, CANVAS_W, DEFAULT_DRAFTS_ROOT, TEMPLATE_DIR, Draft, cover_scale,  # noqa: E402
-                         probe, snap, unique_dir, us, write_draft)
+                         probe, snap, unique_dir, us, write_project)
 
 # 1 = clip fills the canvas width. 1.7 makes the subject bigger and crops most of a date stamp
 # burned into a top corner (2.0 crops all of it); the blurred copy fills the rest.
@@ -23,7 +23,7 @@ ZOOM = 1.7
 FADE_IN = 1.0
 FADE_OUT = 1.5
 REEL_LENGTH = (15, 60)
-MUSIC_FILE = "bgm.m4a"
+MUSIC_FILE = "bgm-{}.m4a"
 PREVIEW_ROWS = 8
 
 
@@ -55,12 +55,12 @@ def audio_duration(path):
 
 
 class Reel:
-    def __init__(self, reel, video, music, template, drafts_root):
+    def __init__(self, reel, number, video, music, template, project_dir):
         self.reel = reel
         self.video = video
         self.music = music
-        self.draft_dir = unique_dir(drafts_root, reel["name"])
-        self.draft = Draft(template, self.draft_dir)
+        self.music_file = project_dir / MUSIC_FILE.format(number)
+        self.draft = Draft(template, project_dir)
         self.material, self.info = self.draft.media_material(video)
         self.clips = []
         self.warnings = []
@@ -112,7 +112,7 @@ class Reel:
     def music_segment(self):
         d = self.draft
         # The woosh SFX prototype is a plain local audio file; strip its CapCut-library identity.
-        audio_id = d.add_material(d.proto_segment("woosh")["material_id"], path=str(self.draft_dir / MUSIC_FILE),
+        audio_id = d.add_material(d.proto_segment("woosh")["material_id"], path=str(self.music_file),
                                   name=self.music.stem, duration=us(self.T), effect_id="", app_id=0,
                                   category_id="", category_name="")
         seg = d.segment("woosh", 0, self.T, material_id=audio_id)
@@ -120,15 +120,15 @@ class Reel:
         seg["volume"] = self.reel.get("music_volume", 1.0)
         d.place("music", "woosh", seg)
 
-    def write(self, data):
+    def cover_time(self):
         first = self.clips[0]
-        write_draft(data, self.draft_dir, self.draft_dir.name, self.T, self.video,
-                    (first["at"] + first["src_end"]) / 2)
-        if self.music:
-            start = self.reel.get("music_start", 0)
-            fades = f"afade=t=in:d={FADE_IN},afade=t=out:st={self.T - FADE_OUT:.3f}:d={FADE_OUT}"
-            subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", str(start), "-t", f"{self.T:.3f}", "-i", str(self.music),
-                            "-af", fades, "-c:a", "aac", "-b:a", "192k", str(self.draft_dir / MUSIC_FILE)], check=True)
+        return (first["at"] + first["src_end"]) / 2
+
+    def write_music(self):
+        start = self.reel.get("music_start", 0)
+        fades = f"afade=t=in:d={FADE_IN},afade=t=out:st={self.T - FADE_OUT:.3f}:d={FADE_OUT}"
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", str(start), "-t", f"{self.T:.3f}", "-i", str(self.music),
+                        "-af", fades, "-c:a", "aac", "-b:a", "192k", str(self.music_file)], check=True)
 
     def preview(self, sheet):
         """One row per clip: its first, middle and last frame, cropped to what shows sharp."""
@@ -180,19 +180,25 @@ def main():
     if music and not music.exists():
         sys.exit(f"File not found: {music}")
     template = json.loads((TEMPLATE_DIR / "draft_info.json").read_text())
-    drafts_root = Path(args.drafts_root).expanduser()
+    project_dir = unique_dir(Path(args.drafts_root).expanduser(), plan.get("name") or f"ASMR {video.stem}")
 
     preview_dir = plan_path.parent / "preview"
+    reels, timelines = [], []
     for n, spec in enumerate(plan["reels"], 1):
-        reel = Reel(spec, video, music, template, drafts_root)
-        data = reel.build()
+        reel = Reel(spec, n, video, music, template, project_dir)
+        timelines.append((spec["name"], reel.build()))
+        reels.append(reel)
         print(reel.summary())
         if args.dry_run:
             preview_dir.mkdir(exist_ok=True)
             reel.preview(preview_dir / f"reel-{n}.jpg")
-        else:
-            reel.write(data)
-            print(f"  → {reel.draft_dir}")
+    if args.dry_run:
+        return
+    write_project(timelines, project_dir, project_dir.name, video, reels[0].cover_time())
+    if music:
+        for reel in reels:
+            reel.write_music()
+    print(f"→ {project_dir} ({len(timelines)} timelines)")
 
 
 if __name__ == "__main__":

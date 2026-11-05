@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build a CapCut draft in the "0827" talking-head style from an edit plan.
 
-Usage: build_draft.py <plan.json> [--drafts-root DIR] [--dry-run]
+Usage: build_draft.py <plan.json> [--drafts-root DIR] [--dry-run | --timeline]
 
 Every segment is cloned from a prototype in assets/template/draft_info.json, so effect IDs,
 fonts, animations and colour grading match the reference project. The plan only decides
@@ -30,6 +30,9 @@ FPS = 60
 SEC = 1_000_000
 CANVAS_W, CANVAS_H = 1080, 1920
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".bmp"}
+# broll src_start value for a clip rendered on the output timeline (motion graphics): every
+# moment of the clip plays at the same time it has in the edit, wherever the cover lands.
+TIMELINE_LOCKED = "timeline"
 
 # Pace: a pause longer than MAX_GAP is cut out; the pads keep word attacks and tails intact.
 MAX_GAP = 0.3
@@ -498,7 +501,8 @@ class Editor:
         silences = silences_for_kept(audio, self.words, plan["keep"], self.aroll_info["duration"])
         self.speech = SpeechTimeline(self.words, plan["keep"], self.aroll_info["duration"], silences,
                                      plan.get("trim_tail"))
-        self.T = self.speech.duration
+        # end_hold: seconds the picture stays after the last word, e.g. a motion graphic's end card.
+        self.T = self.speech.duration + plan.get("end_hold", 0.0)
         self.sfx = []
         self.blur_spans = []
         self.texts = []
@@ -529,11 +533,13 @@ class Editor:
         covers = self.covers()
         overlays = self.overlays()
         shots = self.main_track(covers, hook_end)
-        self.subtitles()
+        if self.plan.get("subtitles", True):
+            self.subtitles()
         self.cta()
         self.credit()
         self.layout_notes = resolve_text_layout(self.texts)
-        self.grading()
+        if self.plan.get("grading", True):
+            self.grading()
         self.sound_effects()
         return shots
 
@@ -579,11 +585,11 @@ class Editor:
         self._snap_to_cuts(covers)
         for prev, nxt in zip(covers, covers[1:]):
             nxt["start"] = max(nxt["start"], prev["end"])
-            if nxt["start"] - prev["end"] < MIN_SHOT:
+            if nxt["start"] - prev["end"] < MIN_SHOT or _one_locked_clip(prev, nxt):
                 prev["end"] = nxt["start"]
         if covers and covers[0]["start"] < MIN_SHOT:
             covers[0]["start"] = 0.0
-        if covers and self.T - covers[-1]["end"] < MIN_SHOT:
+        if covers and self.speech.duration - covers[-1]["end"] < MIN_SHOT:
             covers[-1]["end"] = self.T
         covers = [c for c in covers if c["end"] - c["start"] > 1 / FPS]
         for cover in covers:
@@ -607,6 +613,8 @@ class Editor:
         if not info["is_image"] and info["duration"] < need:
             cover["end"] = snap(cover["start"] + info["duration"] - 1 / FPS)
             need = cover["end"] - cover["start"]
+        if cover["src_start"] == TIMELINE_LOCKED:
+            cover["src_start"] = cover["start"]
         if cover["src_start"] is None:
             cover["src_start"] = 0.0 if info["is_image"] else max((info["duration"] - need) / 2, 0.0)
         cover["src_start"] = min(cover["src_start"], max(info["duration"] - need, 0.0))
@@ -820,6 +828,11 @@ class Editor:
             if end - start > 1 / FPS:
                 seg = self.draft.segment(name, start, end)
                 self.draft.place("sfx", name, seg)
+
+
+def _one_locked_clip(a, b):
+    """Two covers cut from the same timeline-locked clip: the gap between them is that clip too."""
+    return a.get("src_start") == b.get("src_start") == TIMELINE_LOCKED and a.get("file") == b.get("file")
 
 
 def _snap_to(edges, t):
@@ -1109,11 +1122,20 @@ def render_tail_sheets(editor, shots, out_dir):
         row.unlink()
 
 
+def output_timeline(editor):
+    """Kept words at their time in the edit, for motion graphics rendered outside CapCut."""
+    words = [{"i": i, "w": editor.words[i]["w"], "start": start, "end": end}
+             for i in editor.speech.kept for start, end in [editor.speech.out[i]]]
+    return {"duration": editor.T, "words": words}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("plan")
     ap.add_argument("--drafts-root", default=str(DEFAULT_DRAFTS_ROOT))
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--timeline", action="store_true",
+                    help="only write timeline.json (kept words on the output timeline) next to the plan")
     args = ap.parse_args()
 
     plan_path = Path(args.plan).resolve()
@@ -1122,6 +1144,11 @@ def main():
     draft_dir = unique_dir(Path(args.drafts_root).expanduser(), plan["name"])
     draft = Draft(template, draft_dir)
     editor = Editor(plan, plan_path.parent, draft)
+    if args.timeline:
+        out = plan_path.parent / "timeline.json"
+        out.write_text(json.dumps(output_timeline(editor), ensure_ascii=False, indent=1))
+        print(f"Timeline written: {out}")
+        return
     shots = editor.build()
     data = draft.finish(["main", "texts", "overlay", "filter", "adjust", "hook", "subtitles", "credit",
                          "speech", "sfx"], editor.T)

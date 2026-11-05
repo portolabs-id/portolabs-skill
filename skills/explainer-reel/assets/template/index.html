@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="id" data-resolution="portrait">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Manrope:wght@500;700;800&display=block" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.15.0/dist/gsap.min.js"></script>
+    <style>
+      :root {
+        --ground: #fdfdfd;
+        --main: #3170e8;
+        --ink: #16181d;
+        --muted: #929395;
+        --label: #747577;
+        --grid: color-mix(in srgb, var(--ink) 8%, var(--ground));
+        --sans: "Manrope", system-ui, sans-serif;
+        --serif: "Instrument Serif", Georgia, serif;
+      }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--ground); }
+      #root { position: relative; width: 1080px; height: 1920px; overflow: hidden; color: var(--ink); font-family: var(--sans); }
+      .ground {
+        position: absolute; inset: 0;
+        background:
+          linear-gradient(90deg, transparent 70px, var(--grid) 70px) 0 0 / 72px 72px,
+          linear-gradient(transparent 70px, var(--grid) 70px) 0 0 / 72px 72px,
+          var(--ground);
+      }
+
+      /* Progress rail: mascot playhead and the chip naming the current beat. */
+      .rail { position: absolute; left: 69px; top: 0; width: 6px; height: 100%; border-radius: 3px; background: var(--grid); }
+      .rail-fill { position: absolute; left: 0; top: 0; width: 100%; border-radius: 3px; background: var(--main); }
+      .mascot { position: absolute; left: 28px; top: -44px; width: 88px; height: 88px; z-index: 3; }
+      .chip {
+        position: absolute; left: 128px; top: -28px; z-index: 3; display: flex; align-items: center; gap: 12px;
+        height: 56px; padding: 0 26px 0 10px; border-radius: 28px; background: var(--main); color: var(--ground);
+        font-size: 28px; font-weight: 700; white-space: nowrap; visibility: hidden;
+      }
+      .chip b { display: grid; place-items: center; width: 50px; height: 40px; border-radius: 20px; background: color-mix(in srgb, var(--ink) 22%, var(--main)); font-size: 28px; }
+
+      /* Scenes fill the stage between the rail chip and the bottom safe zone. */
+      .scene { position: absolute; left: 0; top: 0; width: 1080px; height: 1920px; opacity: 0; pointer-events: none; }
+      .card { position: absolute; background: var(--ground); border-radius: 28px; box-shadow: 0 0 0 2px var(--grid), 0 18px 44px rgba(0, 0, 0, 0.09); }
+      .label { font-size: 30px; font-weight: 800; line-height: 1.15; }
+      .note { font-size: 28px; font-weight: 600; color: var(--label); }
+      .big { font-size: 104px; font-weight: 800; line-height: 1; letter-spacing: -0.03em; }
+
+      /* Logos keep their own colours: the tile frames them and never tints them. */
+      .tile { flex: none; display: grid; place-items: center; background: var(--ground); box-shadow: inset 0 0 0 2px var(--grid); }
+      .tile img { object-fit: contain; border-radius: 22%; }
+      .tile .mono { font-weight: 800; color: var(--main); letter-spacing: -0.02em; }
+
+      /* Screenshots sit in one plain browser frame so every site looks part of the same film. */
+      .shot { overflow: hidden; }
+      .shot-bar { display: flex; gap: 10px; align-items: center; height: 44px; padding: 0 20px; background: color-mix(in srgb, var(--ink) 4%, var(--ground)); }
+      .shot-bar i { width: 13px; height: 13px; border-radius: 50%; background: var(--grid); }
+      .shot-view { overflow: hidden; }
+      .shot-view img { display: block; width: 100%; }
+
+      /* Caption: one line at the top, word by word. */
+      .cap { position: absolute; left: 110px; right: 110px; top: 290px; text-align: center; font-size: 68px; line-height: 1.25; font-weight: 700; letter-spacing: -0.01em; opacity: 0; }
+      .cap .w { display: inline-block; position: relative; z-index: 0; margin: 0 0.12em; color: var(--muted); opacity: 0.16; transform: translateY(26px); filter: blur(10px); }
+      .cap .w.em, .cap .w.sel { color: var(--ink); }
+      .cap .w.em { font-family: var(--serif); font-style: italic; font-weight: 400; font-size: 1.16em; line-height: 1; }
+      .cap .w.sel { margin: 0 0.3em; }
+      .sel-box { position: absolute; z-index: -1; inset: -2px -12px; border: 2px solid var(--main); border-radius: 3px; background: color-mix(in srgb, var(--main) 12%, var(--ground)); opacity: 0; transform: scale(0.85); }
+      .sel-box::before, .sel-box::after { content: ""; position: absolute; width: 11px; height: 11px; border: 2px solid var(--main); border-radius: 2px; background: var(--ground); }
+      .sel-box::before { left: -8px; top: -8px; }
+      .sel-box::after { right: -8px; bottom: -8px; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="{{DURATION}}" data-width="1080" data-height="1920">
+      <div class="ground"></div>
+      <div class="rail"><div class="rail-fill"></div></div>
+      <svg class="mascot" viewBox="0 0 88 88">
+        <circle cx="44" cy="44" r="40" style="fill: var(--ground); stroke: var(--main); stroke-width: 4" />
+        <path d="M18 38 Q22 14 44 14 Q68 14 70 38 Q58 28 44 30 Q30 28 18 38Z" style="fill: var(--ink)" />
+        <circle cx="33" cy="47" r="4" style="fill: var(--ink)" />
+        <circle cx="55" cy="47" r="4" style="fill: var(--ink)" />
+        <path d="M32 59 Q44 68 56 59" style="fill: none; stroke: var(--ink); stroke-width: 3.5; stroke-linecap: round" />
+      </svg>
+    </div>
+    <script>
+      /* 1. DATA, filled by new_composition.py. Do not edit by hand. */
+      const TIMELINE = {{TIMELINE}}; // timeline.json: kept words at their time in the edit
+      const BEATS = {{BEATS}}; // beats.json: each beat's word range, chip, "sel" and "em" words
+      const ASSETS = {{ASSETS}}; // assets/manifest.json: logos and screenshots by name
+
+      /* 2. SCENES: one function per beat id, written for this reel (references/style.md).
+         scene(el, beat, tl, kit): build into el, animate on tl at absolute times from kit.at(word). */
+      const SCENES = {
+        // hook(el, beat, tl, kit) {
+        //   const tile = kit.place(el, kit.logo("claude", 160), 540, 1000);
+        //   kit.pop(tile, kit.at(beat.sel[0]));
+        // },
+      };
+
+      /* 3. ENGINE: captions, rail, scene in and out. Leave as is. */
+      const DUR = TIMELINE.duration;
+      const WORD_IN = 0.22, MAX_WORDS = 4, MAX_CHARS = 24, SCENE_IN = 0.35, SCENE_OUT = 0.22;
+      const RAIL_FROM = 520, RAIL_TO = 640;
+      const INK = "#16181d", MUTED = "#929395";
+      const root = document.getElementById("root");
+      const tl = gsap.timeline({ paused: true });
+      const byIndex = Object.fromEntries(TIMELINE.words.map((w) => [w.i, w]));
+      const firstWord = (beat) => byIndex[beat.from_word] || TIMELINE.words.find((w) => w.i >= beat.from_word);
+      const repeatsUntilEnd = (start, period) => Math.max(0, Math.floor((DUR - start) / period) - 1);
+      BEATS.forEach((beat, n) => {
+        beat.start = n === 0 ? 0 : firstWord(beat).start;
+        beat.n = n;
+      });
+      BEATS.forEach((beat, n) => { beat.end = n + 1 < BEATS.length ? BEATS[n + 1].start : DUR; });
+
+      const kit = {
+        at: (i) => byIndex[i].start,
+        end: (i) => byIndex[i].end,
+        h(html) {
+          const template = document.createElement("template");
+          template.innerHTML = html.trim();
+          return template.content.firstElementChild;
+        },
+        place(parent, el, x, y) {
+          el.style.position = "absolute";
+          el.style.left = x + "px";
+          el.style.top = y + "px";
+          gsap.set(el, { xPercent: -50, yPercent: -50 });
+          parent.append(el);
+          return el;
+        },
+        logo(name, size = 64) {
+          const tile = document.createElement("div");
+          tile.className = "tile";
+          Object.assign(tile.style, { width: size + "px", height: size + "px", borderRadius: size * 0.28 + "px" });
+          const asset = ASSETS[name];
+          tile.innerHTML = asset && asset.file
+            ? `<img src="assets/${asset.file}" alt="" style="width:${size * 0.69}px;height:${size * 0.69}px" />`
+            : `<span class="mono" style="font-size:${size * 0.4}px">${name.slice(0, 2)}</span>`;
+          return tile;
+        },
+        shot(name, width = 860) {
+          const card = document.createElement("div");
+          card.className = "card shot";
+          card.style.width = width + "px";
+          card.innerHTML = `<div class="shot-bar"><i></i><i></i><i></i></div><div class="shot-view" style="height:${Math.round(width * 0.625)}px"><img src="assets/${ASSETS[name].file}" alt="" /></div>`;
+          return card;
+        },
+        pop(el, t) {
+          tl.fromTo(el, { autoAlpha: 0, scale: 0.6, y: 30 }, { autoAlpha: 1, scale: 1, y: 0, duration: 0.45, ease: "back.out(1.7)" }, Math.max(0, t - 0.1));
+        },
+        float(el, from, amount = 6) {
+          tl.to(el, { y: -amount, duration: 1.6, ease: "sine.inOut", yoyo: true, repeat: repeatsUntilEnd(from, 1.6) }, from);
+        },
+        zoom(shot, t, { x = 50, y = 30, scale = 1.6, duration = 0.8 } = {}) {
+          const img = shot.querySelector("img");
+          tl.set(img, { transformOrigin: `${x}% ${y}%` }, Math.max(0, t - 0.01));
+          tl.to(img, { scale, duration, ease: "power2.inOut" }, t);
+        },
+      };
+
+      // Scenes, under the captions and the rail.
+      BEATS.forEach((beat) => {
+        const el = document.createElement("div");
+        el.className = "scene";
+        el.dataset.beat = beat.id;
+        root.insertBefore(el, root.querySelector(".mascot"));
+        if (SCENES[beat.id]) SCENES[beat.id](el, beat, tl, kit);
+        if (beat.n === 0) gsap.set(el, { opacity: 1 });
+        else tl.fromTo(el, { opacity: 0, y: 40 }, { opacity: 1, y: 0, duration: SCENE_IN, ease: "power3.out" }, beat.start - 0.12);
+        if (beat.end < DUR) tl.to(el, { opacity: 0, y: -30, duration: SCENE_OUT, ease: "power2.in" }, beat.end - SCENE_OUT);
+      });
+
+      // Rail: the playhead creeps down the whole reel; each beat's chip slides in as it starts.
+      // One chip per beat: GSAP would read a "01" set as textContent as the number 1.
+      BEATS.forEach((beat) => {
+        const chip = document.createElement("div");
+        chip.className = "chip";
+        chip.innerHTML = `<b>${String(beat.n + 1).padStart(2, "0")}</b><span></span>`;
+        chip.lastElementChild.textContent = beat.chip;
+        root.append(chip);
+        if (beat.n === 0) gsap.set(chip, { autoAlpha: 1 });
+        else tl.fromTo(chip, { autoAlpha: 0, x: -24 }, { autoAlpha: 1, x: 0, duration: 0.3, ease: "power3.out" }, beat.start);
+        if (beat.end < DUR) tl.to(chip, { autoAlpha: 0, duration: 0.15, ease: "power2.in" }, beat.end - 0.15);
+      });
+      tl.fromTo(".rail-fill", { height: RAIL_FROM }, { height: RAIL_TO, duration: DUR, ease: "none" }, 0);
+      tl.fromTo([".mascot", ".chip"], { y: RAIL_FROM }, { y: RAIL_TO, duration: DUR, ease: "none" }, 0);
+
+      // Captions: pages of up to MAX_WORDS words, broken after punctuation. A page that is full one
+      // word before a comma or full stop takes that word too, so it never flashes alone.
+      const endsClause = (word) => /[.,!?;:]$/.test(word.w);
+      const pages = [];
+      BEATS.forEach((beat) => {
+        const looks = {};
+        (beat.sel || []).forEach((i) => (looks[i] = "sel"));
+        (beat.em || []).forEach((i) => (looks[i] = "em"));
+        let page = [];
+        for (let i = beat.from_word; i <= beat.to_word; i++) {
+          const word = byIndex[i];
+          if (!word || !word.w) continue;
+          page.push({ i, look: looks[i] || "" });
+          const chars = page.reduce((sum, p) => sum + byIndex[p.i].w.length + 1, 0);
+          const next = i < beat.to_word ? byIndex[i + 1] : null;
+          const full = page.length >= MAX_WORDS || chars >= MAX_CHARS;
+          const orphanNext = next && next.w && endsClause(next) && page.length <= MAX_WORDS;
+          if (endsClause(word) || (full && !orphanNext)) {
+            pages.push(page);
+            page = [];
+          }
+        }
+        if (page.length) pages.push(page);
+      });
+      pages.forEach((page, p) => {
+        const el = document.createElement("p");
+        el.className = "cap";
+        el.textContent = page.map(({ i }) => byIndex[i].w).join(" ");
+        const parts = el.textContent.split(" ");
+        el.textContent = "";
+        root.append(el);
+        const from = byIndex[page[0].i].start - WORD_IN;
+        const next = pages[p + 1];
+        const until = next ? byIndex[next[0].i].start - WORD_IN : Infinity;
+        tl.set(el, { opacity: 1 }, Math.max(0, from));
+        if (until < DUR) tl.to(el, { opacity: 0, y: -18, duration: 0.12, ease: "power2.in" }, until - 0.12);
+        parts.forEach((text, k) => {
+          const { i, look } = page[k];
+          const span = document.createElement("span");
+          span.className = "w " + look;
+          span.textContent = text;
+          if (look === "sel") span.prepend(Object.assign(document.createElement("i"), { className: "sel-box" }));
+          el.append(span);
+          const { start, end } = byIndex[i];
+          const enter = start - WORD_IN;
+          if (enter <= 0) gsap.set(span, { opacity: 1, y: 0, filter: "blur(0px)" });
+          else tl.to(span, { opacity: 1, y: 0, filter: "blur(0px)", duration: WORD_IN, ease: "power3.out" }, enter);
+          if (!look) {
+            tl.set(span, { color: INK }, Math.max(0, enter));
+            tl.set(span, { color: MUTED }, end + 0.12);
+          }
+          const box = span.querySelector(".sel-box");
+          if (box) tl.to(box, { opacity: 1, scale: 1, duration: 0.28, ease: "back.out(1.7)" }, Math.max(0, start - 0.08));
+        });
+      });
+
+      window.__timelines = window.__timelines || {};
+      window.__timelines["main"] = tl;
+      tl.seek(0);
+    </script>
+  </body>
+</html>

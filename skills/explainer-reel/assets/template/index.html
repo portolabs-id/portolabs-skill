@@ -30,9 +30,13 @@
       /* Progress rail: mascot playhead and the chip naming the current beat. */
       .rail { position: absolute; left: 69px; top: 0; width: 6px; height: 100%; border-radius: 3px; background: var(--grid); }
       .rail-fill { position: absolute; left: 0; top: 0; width: 100%; border-radius: 3px; background: var(--main); }
-      .mascot { position: absolute; left: 28px; top: -44px; width: 88px; height: 88px; z-index: 3; }
+      .mascot {
+        position: absolute; left: 12px; top: -60px; width: 120px; height: 120px; z-index: 3; overflow: hidden;
+        border-radius: 50%; background: var(--ground); box-shadow: 0 0 0 4px var(--main), 0 10px 24px rgba(0, 0, 0, 0.12);
+      }
+      .mascot img { display: block; width: 100%; height: 100%; }
       .chip {
-        position: absolute; left: 128px; top: -28px; z-index: 3; display: flex; align-items: center; gap: 12px;
+        position: absolute; left: 150px; top: -28px; z-index: 3; display: flex; align-items: center; gap: 12px;
         height: 56px; padding: 0 26px 0 10px; border-radius: 28px; background: var(--main); color: var(--ground);
         font-size: 28px; font-weight: 700; white-space: nowrap; visibility: hidden;
       }
@@ -73,13 +77,7 @@
     <div id="root" data-composition-id="main" data-start="0" data-duration="{{DURATION}}" data-width="1080" data-height="1920">
       <div class="ground"></div>
       <div class="rail"><div class="rail-fill"></div></div>
-      <svg class="mascot" viewBox="0 0 88 88">
-        <circle cx="44" cy="44" r="40" style="fill: var(--ground); stroke: var(--main); stroke-width: 4" />
-        <path d="M18 38 Q22 14 44 14 Q68 14 70 38 Q58 28 44 30 Q30 28 18 38Z" style="fill: var(--ink)" />
-        <circle cx="33" cy="47" r="4" style="fill: var(--ink)" />
-        <circle cx="55" cy="47" r="4" style="fill: var(--ink)" />
-        <path d="M32 59 Q44 68 56 59" style="fill: none; stroke: var(--ink); stroke-width: 3.5; stroke-linecap: round" />
-      </svg>
+      <div class="mascot"><img src="mascot.png" alt="" /></div>
     </div>
     <script>
       /* 1. DATA, filled by new_composition.py. Do not edit by hand. */

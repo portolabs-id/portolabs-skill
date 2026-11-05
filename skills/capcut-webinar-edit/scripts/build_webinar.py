@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "capcut-auto-edit" / "scripts"))
-from build_draft import (DEFAULT_DRAFTS_ROOT, TEMPLATE_DIR, Draft, SpeechTimeline, kept_loudness,  # noqa: E402
+from build_draft import (DEFAULT_DRAFTS_ROOT, TEMPLATE_DIR, Draft, SpeechTimeline,  # noqa: E402
                          silences_for_kept, snap, speech_gain, unique_dir, us, write_draft)
 
 STING = Path(__file__).resolve().parent.parent / "assets" / "portolabs-sting.mp4"
@@ -78,7 +78,7 @@ class Lesson:
         self.stings = {name: self.media(path, gain=1.0) for name, path in stings.items()}
         silences = silences_for_kept(audio, words, self.keep, self.raw["info"]["duration"])
         self.speech = lesson_speech(words, self.keep, self.raw["info"]["duration"], silences)
-        self.raw["gain"] = speech_gain(kept_loudness(audio, words, self.keep))
+        self.raw["gain"] = speech_gain(audio, words, self.keep)
 
     def media(self, path, gain):
         """A video material plus an audio material reading the same file, as capcut-auto-edit does:

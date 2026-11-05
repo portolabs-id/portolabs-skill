@@ -62,6 +62,7 @@ CREDIT_EVERY = 12.0
 CREDIT_POSITIONS = [(-0.82, 0.76), (0.53, -0.17), (-0.58, -0.55), (0.60, 0.39), (-0.49, -0.21)]
 TARGET_LUFS = -14.0
 SPEECH_GAIN_RANGE = (0.5, 6.0)
+PEAK_CEILING_DBFS = -1.0
 # A pause is anything this far under the loudness of the speech being kept (its 90th percentile).
 SILENCE_BELOW_KEPT_SPEECH_DB = -20
 # Text layout estimate, in px per (font size × scale), measured on CapCut's render of the 0827 cover.
@@ -163,9 +164,22 @@ def _kept_levels(audio, words, keep):
     return spoken, spoken[int(len(spoken) * 0.9)]
 
 
-def speech_gain(loudness):
-    gain = 10 ** ((TARGET_LUFS - loudness) / 20)
-    return min(max(gain, SPEECH_GAIN_RANGE[0]), SPEECH_GAIN_RANGE[1])
+def kept_peak(audio, words, keep):
+    """Loudest sample peak (dBFS) from the first to the last word of each kept range, the pauses
+    between them included: word edges drift, and the kept audio runs past them."""
+    window, peaks = audio["window"], audio["peaks"]
+    return max(max(peaks[int(words[a]["s"] / window):int(words[b]["e"] / window) + 1], default=-120.0)
+               for a, b in keep)
+
+
+def speech_gain(audio, words, keep):
+    """Brings the kept speech to TARGET_LUFS without pushing its loudest peak past PEAK_CEILING_DBFS:
+    a voice at -22 LUFS peaking at -1.6 dBFS raised +7 dB clipped in CapCut."""
+    gain = 10 ** ((TARGET_LUFS - kept_loudness(audio, words, keep)) / 20)
+    gain = min(max(gain, SPEECH_GAIN_RANGE[0]), SPEECH_GAIN_RANGE[1])
+    if "peaks" not in audio:
+        return gain
+    return min(gain, 10 ** ((PEAK_CEILING_DBFS - kept_peak(audio, words, keep)) / 20))
 
 
 # ---------------------------------------------------------------- speech timeline
@@ -501,7 +515,7 @@ class Editor:
             self.words[int(index)]["w"] = text
         self.aroll = self.path(plan["aroll"])
         self.aroll_material, self.aroll_info = draft.media_material(self.aroll)
-        self.gain = speech_gain(kept_loudness(audio, self.words, plan["keep"]))
+        self.gain = speech_gain(audio, self.words, plan["keep"])
         silences = silences_for_kept(audio, self.words, plan["keep"], self.aroll_info["duration"])
         self.speech = SpeechTimeline(self.words, plan["keep"], self.aroll_info["duration"], silences,
                                      plan.get("trim_tail"))

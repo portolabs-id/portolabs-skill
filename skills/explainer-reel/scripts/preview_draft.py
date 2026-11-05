@@ -32,10 +32,11 @@ def main():
         inputs += ["-i", source]
         parts.append(f"[{n + 1}:a]atrim={start}:{start + length},asetpts=PTS-STARTPTS,adelay={at_ms}:all=1[a{n}]")
     mix = ("".join(f"[a{n}]" for n in range(len(audio)))
-           + f"amix=inputs={len(audio)}:normalize=0,loudnorm=I=-14:TP=-1.5:LRA=7[voice]")
+           + f"amix=inputs={len(audio)}:normalize=0,loudnorm=I=-14:TP=-1.5:LRA=7,aresample=48000[voice]")
+    # loudnorm works at 192 kHz; AAC left at that rate gets ~70 kbps and sounds broken.
     subprocess.run(["ffmpeg", "-v", "error", "-y", *inputs, "-filter_complex", ";".join(parts + [mix]),
                     "-map", "0:v", "-map", "[voice]", "-t", str(draft["duration"] / SEC),
-                    "-c:v", "copy", "-c:a", "aac", str(out)], check=True)
+                    "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", str(out)], check=True)
     print(out)
 
 

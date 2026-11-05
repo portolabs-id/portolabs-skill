@@ -3,7 +3,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from transcribe import detect_silences, extract_audio, media_duration, speech_clips
+from transcribe import detect_silences, extract_audio, media_duration, speech_clips, window_peaks
 
 
 def test_extracted_audio_follows_the_video_clock():
@@ -40,8 +40,19 @@ def test_short_pause_between_takes_splits_the_clips():
     assert clips[0][1] <= clips[1][0], clips
 
 
+def test_peaks_come_from_the_loudest_channel():
+    """A mono mix halves a one-sided peak; CapCut clips on the channel itself."""
+    with tempfile.TemporaryDirectory() as tmp:
+        video = Path(tmp) / "one-side.mov"
+        subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "color=black:s=64x64:d=1",
+                        "-f", "lavfi", "-i", "aevalsrc='0.05*sin(2*PI*440*t)|0.5*sin(2*PI*440*t)':d=1:s=48000",
+                        "-c:v", "libx264", "-c:a", "pcm_s16le", str(video)], check=True)
+        assert abs(max(window_peaks(video)) + 6.0) < 0.2, max(window_peaks(video))
+
+
 if __name__ == "__main__":
     test_extracted_audio_follows_the_video_clock()
     test_mouth_click_does_not_split_a_pause()
     test_short_pause_between_takes_splits_the_clips()
+    test_peaks_come_from_the_loudest_channel()
     print("ok")

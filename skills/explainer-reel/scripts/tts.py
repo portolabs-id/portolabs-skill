@@ -49,8 +49,16 @@ FRAME_SIZE = "1080x1920"
 FRAME_RATE = 60
 # The closing card stays this long after the last word, so the CTA can be read.
 END_HOLD = 2.0
-# The voice is mastered once, here, before anything is timed or measured from it.
-VOICE_CLEANUP = "highpass=f=80,acompressor=threshold=-20dB:ratio=3:attack=10:release=150:makeup=2"
+# The voice is mastered once, here, before anything is timed or measured from it, to a warm
+# podcast sound (approved on the cabai-inflasi reel; a brighter +2 dB at 4 kHz was "kurang hangat").
+WARM_PODCAST_TONE = ",".join([
+    "highpass=f=70",  # rumble
+    "bass=g=5:f=180:w=0.8",  # body
+    "equalizer=f=350:t=q:w=1.2:g=-1.5",  # mud
+    "treble=g=-4:f=7000:w=0.7",  # harsh highs
+    "deesser=i=0.4",  # sibilance
+    "acompressor=threshold=-22dB:ratio=3.5:attack=8:release=120:makeup=2.5",  # even level
+])
 LOUDNORM = "loudnorm=I=-14:TP=-1.5:LRA=7"
 VOICE_RATE = 44100
 
@@ -113,10 +121,10 @@ def starting_plan(title, words, beats):
 
 def master_voice(raw, out):
     """ElevenLabs speaks at about -22 LUFS with peaks near -1.6 dBFS; raised to -14 LUFS later, in
-    CapCut, it clipped. Cleaned and lightly compressed, the voice goes to -14 LUFS under -1.5 dBTP
-    with two-pass loudnorm: one linear gain when its peaks allow it, else loudnorm rides the gain
-    itself. Either way every sample stays where it was, so the words keep their times."""
-    chain = f"{VOICE_CLEANUP},{LOUDNORM}"
+    CapCut, it clipped. Given a warm podcast tone and compressed, the voice goes to -14 LUFS under
+    -1.5 dBTP with two-pass loudnorm: one linear gain when its peaks allow it, else loudnorm rides
+    the gain itself. Either way every sample stays where it was, so the words keep their times."""
+    chain = f"{WARM_PODCAST_TONE},{LOUDNORM}"
     log = ffmpeg_filter_log(raw, f"{chain}:print_format=json")
     m = json.loads(log[log.rindex("{"):log.rindex("}") + 1])
     measured = (f"measured_I={m['input_i']}:measured_TP={m['input_tp']}:measured_LRA={m['input_lra']}"

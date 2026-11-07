@@ -106,7 +106,12 @@ last word. One action only (follow, save, comment a keyword).
 
 ## Checks before render
 
-1. `npx -y hyperframes@0.9.14 check` passes. Expected warnings: `negative_z_index` (the selection
-   box sits inside its word) and `film_silent` (the sound is added in CapCut).
-2. `snapshot --at` the start of every beat and the last frame; read the contact sheet. Look for
-   overlaps, cut-off text, a logo that is wrong or blurry.
+1. `npx -y hyperframes@0.9.14 check --at <built> --no-collapse-static` passes, with the times
+   `new_composition.py` printed. Expected warnings: `negative_z_index` (the selection box sits inside
+   its word) and `film_silent` (the sound is added in CapCut). A line drawn through a word on purpose
+   carries `data-layout-allow-occlusion` on the line itself, or `check` reports the word as hidden.
+2. **No text runs out of its box.** `text_box_overflow` ✗ names the text and by how many pixels:
+   widen the card (up to 800 px), shorten the words, or lower the font size. A number or a short
+   label that must stay on one line gets `white-space:nowrap` and a size that fits.
+3. `snapshot --at <built>`; read the contact sheet. Look for text past a card's edge, a line that
+   wrapped where it should not ("PMK 49/" over "2026"), overlaps, and a logo that is wrong or blurry.

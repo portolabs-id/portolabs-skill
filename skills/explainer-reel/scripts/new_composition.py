@@ -8,6 +8,9 @@ assets/manifest.json (fetch_assets.py, optional). Writes <work_dir>/motion/, a H
 project whose index.html is the template with that data in place and assets/ copied in.
 Only the SCENES block is left to write. Run again after the voice or the assets change: it
 keeps the SCENES block already written.
+
+It also prints the moment each scene is fully built, for `hyperframes check --at` and
+`snapshot --at`: a bare `check` samples 9 points across the reel and can miss a whole scene.
 """
 import json
 import os
@@ -21,6 +24,15 @@ SKILL_DIR = Path(__file__).resolve().parent.parent
 TEMPLATE = SKILL_DIR / "assets" / "template" / "index.html"
 HYPERFRAMES = "hyperframes@0.9.14"
 SCENES_BLOCK = re.compile(r"const SCENES = \{.*?\n      \};", re.S)
+# The engine starts fading a scene out 0.22 s before the next beat; sample just before that.
+SETTLE = 0.3
+
+
+def settled_times(timeline, beats):
+    """When each beat's scene is fully built: just before the next beat starts, and near the end."""
+    starts = [0.0] + [next(w["start"] for w in timeline["words"] if w["i"] >= beat["from_word"]) for beat in beats[1:]]
+    ends = starts[1:] + [timeline["duration"]]
+    return [round(max(start, end - SETTLE), 2) for start, end in zip(starts, ends)]
 
 
 def main():
@@ -53,6 +65,8 @@ def main():
             .replace("{{ASSETS}}", json.dumps(assets, ensure_ascii=False)))
     index.write_text(html)
     print(f"{index}\nBeats to write in SCENES: {', '.join(b['id'] for b in beats)}")
+    print(f"Each scene fully built (check --at ... --no-collapse-static, snapshot --at): "
+          f"{','.join(map(str, settled_times(timeline, beats)))}")
 
 
 if __name__ == "__main__":

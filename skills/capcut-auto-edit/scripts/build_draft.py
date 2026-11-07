@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Build a CapCut draft in the "0827" talking-head style from an edit plan.
+"""Build a CapCut talking-head draft from an edit plan, in the plan's style.
 
 Usage: build_draft.py <plan.json> [--drafts-root DIR] [--dry-run | --timeline]
 
-Every segment is cloned from a prototype in assets/template/draft_info.json, so effect IDs,
-fonts, animations and colour grading match the reference project. The plan only decides
+plan.style picks the look: "della" (the default, from the CapCut project "0827 (1)") or "minimal"
+(minimal_style.py). Every segment is cloned from a prototype in assets/template/draft_info.json, so
+effect IDs, fonts, animations and colour grading match the reference project. The plan only decides
 what is said (word ranges to keep) and where things appear (word indices).
 """
 import argparse
@@ -31,6 +32,10 @@ SEC = 1_000_000
 CANVAS_W, CANVAS_H = 1080, 1920
 DEFAULT_TIMELINE_NAME = "Timeline 01"
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".bmp"}
+# The template's photo material is a CapCut library image ("Solid color Black texture background").
+# Its library id makes CapCut swap any file cloned from it for that cached texture, so every media
+# material is marked local.
+LOCAL_MEDIA = {"material_id": "", "source": 0, "category_id": "", "category_name": "local", "is_copyright": False}
 # broll src_start value for a clip rendered on the output timeline (motion graphics): every
 # moment of the clip plays at the same time it has in the edit, wherever the cover lands.
 TIMELINE_LOCKED = "timeline"
@@ -352,13 +357,15 @@ def _to_output(pieces, src_time, prefer_next):
 # ---------------------------------------------------------------- draft assembly
 
 class Draft:
-    def __init__(self, template, draft_dir):
+    def __init__(self, template, draft_dir, extra_materials=None):
+        """extra_materials: {kind: [material]} cloneable like the template's own, for effects a
+        style needs that the template project does not hold (minimal's glitch transition)."""
         self.tpl = template
         self.draft_dir = draft_dir
         self.data = copy.deepcopy(template)
         self.by_id = {}
         self.tpl_materials = {}
-        for kind, items in template["materials"].items():
+        for kind, items in [*template["materials"].items(), *(extra_materials or {}).items()]:
             if isinstance(items, list):
                 for m in items:
                     if isinstance(m, dict) and "id" in m:
@@ -368,6 +375,7 @@ class Draft:
                 items.clear()
         self.lanes = {}
         self.media = {}
+        self.bundled = {}
 
     # -- prototypes
     def proto_segment(self, name):
@@ -428,12 +436,26 @@ class Draft:
         proto_name = "photo" if info["is_image"] else "aroll"
         fields = {"path": path, "material_name": Path(path).name, "width": info["width"],
                   "height": info["height"], "local_material_id": str(uuid.uuid4()),
-                  "type": "photo" if info["is_image"] else "video", "has_audio": info["has_audio"]}
+                  "type": "photo" if info["is_image"] else "video", "has_audio": info["has_audio"], **LOCAL_MEDIA}
         if not info["is_image"]:
             fields["duration"] = us(info["duration"])
         material_id = self.add_material(self.proto_segment(proto_name)["material_id"], **fields)
         self.media[path] = (material_id, info)
         return self.media[path]
+
+    def bundled_media(self, source, relative):
+        """Media made for this draft (overlay PNGs): probed at source, linked at relative inside the
+        draft folder, and copied there by copy_bundled() once the folder exists."""
+        material_id, info = self.media_material(source)
+        self.by_id[material_id]["path"] = str(self.draft_dir / relative)
+        self.bundled[relative] = Path(source)
+        return material_id, info
+
+    def copy_bundled(self):
+        for relative, source in self.bundled.items():
+            target = self.draft_dir / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(source, target)
 
     # -- text
     def set_text(self, seg, text, highlight=None):
@@ -504,8 +526,16 @@ def _utf16_len(text):
 # ---------------------------------------------------------------- edit decisions
 
 class Editor:
-    def __init__(self, plan, plan_dir, draft):
+    """The della style. Other styles subclass it and override build() and the steps they change."""
+    LANES = ["main", "texts", "overlay", "filter", "adjust", "hook", "subtitles", "credit", "speech", "sfx"]
+    # Plan fields another style owns: a della plan that sets one would silently lose it.
+    FOREIGN_FIELDS = ("emphasis", "strike", "behind", "head_y", "icons", "alerts", "rec", "rings", "glitch",
+                      "end_fade")
+
+    def __init__(self, plan, plan_dir, draft, dry_run=False):
+        """dry_run: the build only reports; slow renders (minimal's caption layer) wait for the real build."""
         self.plan = plan
+        self.dry_run = dry_run
         self.plan_dir = plan_dir
         self.draft = draft
         words_path = self.path(plan["words"])
@@ -525,6 +555,14 @@ class Editor:
         self.blur_spans = []
         self.texts = []
         self.layout_notes = []
+        foreign = [key for key in self.FOREIGN_FIELDS if key in plan]
+        if foreign:
+            sys.exit(f"plan sets {', '.join(foreign)}, which style \"{plan.get('style', 'della')}\" does not use. "
+                     "Set plan.style or drop those fields.")
+
+    def report_lines(self):
+        """Style-specific lines for the dry-run summary."""
+        return []
 
     def add_text(self, label, lane, proto, seg, item=None):
         """Place a text layer and remember it for the layout check; plan items may set "y"."""
@@ -699,13 +737,22 @@ class Editor:
             cursor = max(cursor, cover["end"])
         shots = self.apply_punch_ins(shots)
         shots = self.apply_blur(shots)
+        shots = self.split_for_transitions(shots)
         self.assign_zoom(shots)
-        transition_at = self._nearest_boundary(shots, hook_end) if hook_end else None
+        transitions = self.transitions(shots, hook_end)
         for shot in shots:
-            self.emit_shot(shot, add_transition=transition_at is not None and abs(shot["end"] - transition_at) < 1e-6)
-        if transition_at is not None:
-            self.sfx.append((transition_at, "swish"))
+            self.emit_shot(shot, next((m for t, m in transitions if abs(shot["end"] - t) < 1e-6), None))
+        self.sfx += [(t, "swish") for t, _ in transitions]
         return shots
+
+    def split_for_transitions(self, shots):
+        """Cut shots where a transition must land; della only uses existing cuts."""
+        return shots
+
+    def transitions(self, shots, hook_end):
+        """[(shot boundary, transition material to clone)]: della has one, a Glare II where the hook ends."""
+        at = self._nearest_boundary(shots, hook_end) if hook_end else None
+        return [] if at is None else [(at, self.draft.proto_material("transition", "transitions"))]
 
     def aroll_shots(self, start, end):
         shots = []
@@ -764,7 +811,7 @@ class Editor:
         best = min(ends, key=lambda e: abs(e - t), default=None)
         return best if best is not None and abs(best - t) < 0.5 else None
 
-    def emit_shot(self, shot, add_transition):
+    def emit_shot(self, shot, transition=None):
         d = self.draft
         if shot["kind"] == "card":
             material_id, _ = d.media_material(TEMPLATE_DIR / BLACK_TEXTURE)
@@ -783,8 +830,8 @@ class Editor:
         seg = d.segment(proto, shot["start"], shot["end"], material_id=material_id)
         seg["source_timerange"] = {"start": us(src), "duration": seg["target_timerange"]["duration"]}
         seg["volume"] = 0.0
-        if add_transition:
-            seg["extra_material_refs"].append(d.clone_material(d.proto_material("transition", "transitions")))
+        if transition:
+            seg["extra_material_refs"].append(d.clone_material(transition))
         base = cover_scale(info["width"], info["height"])
         style, amount = shot["style"], shot.get("amount", 1.0)
         scale = base * (amount if style == "punch" else 1.0)
@@ -996,15 +1043,21 @@ ATTACH = re.compile(r"^(-|%|[.,!?…:;])")
 TRAILING_PUNCT = ".,!?…:;"
 
 
+def join_words(texts):
+    """Whisper words as one line: suffixes such as "-nya", "%" and punctuation stick to the word before."""
+    line = ""
+    for w in texts:
+        line += w if (line and ATTACH.match(w)) or not line else " " + w
+    return line
+
+
 def caption_chunks(words, max_words=3, max_chars=18, max_gap=0.25):
     """words: [(index, text, out_start, out_end)] → [(text, start, end)], 2–3 words each."""
     chunks, current = [], []
 
     def flush():
         if current:
-            text = ""
-            for _, w, _, _ in current:
-                text += w if (text and ATTACH.match(w)) or not text else " " + w
+            text = join_words(w for _, w, _, _ in current)
             chunks.append((text.strip(TRAILING_PUNCT + " "), current[0][2], current[-1][3]))
             current.clear()
 
@@ -1112,6 +1165,9 @@ def print_summary(editor, shots):
     print(f"\nLayout check: {to_fix or 'nothing'} to fix")
     for note in editor.layout_notes:
         print(f"  {note}")
+    report = editor.report_lines()
+    if report:
+        print("\n" + "\n".join(report))
 
 
 def visible_tails(editor, shots):
@@ -1165,6 +1221,17 @@ def output_timeline(editor):
     return {"duration": editor.T, "words": words}
 
 
+def style_editor(style):
+    """(Editor class, extra template materials) for plan.style."""
+    if style == "della":
+        return Editor, None
+    if style == "minimal":
+        # Imported here: minimal_style builds on this module.
+        from minimal_style import MinimalEditor, PROTOTYPES
+        return MinimalEditor, PROTOTYPES["materials"]
+    sys.exit(f"Unknown plan.style \"{style}\". Styles: della (default), minimal.")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("plan")
@@ -1178,16 +1245,16 @@ def main():
     plan = json.loads(plan_path.read_text())
     template = json.loads((TEMPLATE_DIR / "draft_info.json").read_text())
     draft_dir = unique_dir(Path(args.drafts_root).expanduser(), plan["name"])
-    draft = Draft(template, draft_dir)
-    editor = Editor(plan, plan_path.parent, draft)
+    editor_class, extra_materials = style_editor(plan.get("style", "della"))
+    draft = Draft(template, draft_dir, extra_materials)
+    editor = editor_class(plan, plan_path.parent, draft, dry_run=args.dry_run)
     if args.timeline:
         out = plan_path.parent / "timeline.json"
         out.write_text(json.dumps(output_timeline(editor), ensure_ascii=False, indent=1))
         print(f"Timeline written: {out}")
         return
     shots = editor.build()
-    data = draft.finish(["main", "texts", "overlay", "filter", "adjust", "hook", "subtitles", "credit",
-                         "speech", "sfx"], editor.T)
+    data = draft.finish(editor.LANES, editor.T)
     print_summary(editor, shots)
     if args.dry_run:
         tails_dir = plan_path.parent / "tails"
@@ -1196,6 +1263,7 @@ def main():
         return
     first_piece = editor.speech.pieces[0]
     write_draft(data, draft_dir, draft_dir.name, editor.aroll, first_piece["src_start"] + 0.5)
+    draft.copy_bundled()
     print(f"\nDraft written: {draft_dir}\nCapCut lists it on its home screen (restart CapCut if it does not appear).")
 
 

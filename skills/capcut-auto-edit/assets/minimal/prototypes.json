@@ -1,0 +1,48 @@
+{
+ "_source": "Signal Glitch 2 and the Fade In animation come from local CapCut projects.",
+ "materials": {
+  "transitions": [
+   {
+    "id": "MINIMAL-GLITCH-TRANSITION",
+    "type": "transition",
+    "name": "Signal Glitch 2",
+    "effect_id": "7343854374147330562",
+    "resource_id": "7343854374147330562",
+    "third_resource_id": "7343854374147330562",
+    "source_platform": 1,
+    "sub_type": 0,
+    "adjust_params": [],
+    "path": "/Users/norld/Movies/CapCut/User Data/Cache/effect/7343854374147330562/bc6d04c47df8aa910544fdf657419ab7",
+    "duration": 400000,
+    "is_overlap": false,
+    "platform": "all",
+    "category_id": "123456",
+    "category_name": "Transitions",
+    "request_id": "2026102510071200000000000001008AC",
+    "is_ai_transition": false,
+    "video_path": "",
+    "task_id": ""
+   }
+  ]
+ },
+ "animations": {
+  "fade_in": {
+   "id": "6798320778182922760",
+   "type": "in",
+   "start": 0,
+   "duration": 500000,
+   "path": "/Users/norld/Movies/CapCut/User Data/Cache/effect/6798320778182922760/883ad04bd79b502aaa55b5d9b87175ea",
+   "platform": "all",
+   "resource_id": "6798320778182922760",
+   "third_resource_id": "6798320778182922760",
+   "source_platform": 1,
+   "name": "Fade In",
+   "category_id": "2037708273",
+   "category_name": "Trending-1",
+   "panel": "video",
+   "material_type": "video",
+   "anim_adjust_params": null,
+   "request_id": "2026091222102590AE79C4AA0CBE9DCD28"
+  }
+ }
+}

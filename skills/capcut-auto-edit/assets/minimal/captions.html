@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="id" data-resolution="portrait">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600;800&display=block" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.15.0/dist/gsap.min.js"></script>
+    <style>
+      :root { --lime: #d4ff3f; --red: #e0262b; }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1080px; height: 1920px; overflow: hidden; background: transparent; }
+      #root { position: relative; width: 1080px; height: 1920px; font-family: "Inter", system-ui, sans-serif; }
+
+      /* One phrase: small lead-in (left), big keyword, small tail (right). */
+      .phrase { position: absolute; left: 540px; display: flex; flex-direction: column; transform: translate(-50%, -50%); }
+      /* Dark shadows keep the words readable over bright footage (screens, documents). */
+      .small { font-size: 52px; font-weight: 600; letter-spacing: -0.015em; line-height: 1.05; color: #fff; white-space: nowrap;
+               text-shadow: 0 2px 6px rgba(0, 0, 0, 0.75), 0 0 26px rgba(0, 0, 0, 0.55); }
+      .lead { text-align: left; padding-left: 0.12em; }
+      .tail { text-align: right; padding-right: 0.12em; }
+      .backdrop { position: absolute; z-index: -1; left: -110px; right: -110px; top: -90px; bottom: -90px;
+                  background: radial-gradient(closest-side, rgba(0, 0, 0, 0.9), rgba(0, 0, 0, 0.55) 55%, rgba(0, 0, 0, 0));
+                  filter: blur(14px); }
+      .key { position: relative; align-self: center; font-size: 150px; font-weight: 800; letter-spacing: -0.045em; line-height: 0.95;
+             color: var(--lime); white-space: nowrap;
+             text-shadow: 0 4px 10px rgba(0, 0, 0, 0.6), 0 0 18px rgba(212, 255, 63, 0.55), 0 0 54px rgba(212, 255, 63, 0.3); }
+      .w { display: inline-block; white-space: pre; }
+      .icon { display: inline-block; width: 64px; height: 64px; margin-right: 14px; vertical-align: -0.28em;
+              filter: drop-shadow(0 0 10px rgba(212, 255, 63, 0.65)); }
+      .key .icon { width: 92px; height: 92px; margin: 0 0 0 20px; vertical-align: middle; }
+      .strike { position: absolute; left: -4%; right: -4%; top: 50%; height: 0.075em; margin-top: -0.0375em; border-radius: 0.04em;
+                background: var(--red); box-shadow: 0 0 14px rgba(224, 38, 43, 0.55); }
+
+      /* Alert card: dark red glass with an icon. */
+      .alert { position: absolute; left: 540px; display: flex; align-items: center; gap: 26px; min-width: 640px;
+               padding: 26px 40px 26px 30px; border-radius: 26px; transform: translate(-50%, -50%);
+               background: linear-gradient(100deg, rgba(150, 14, 28, 0.92), rgba(62, 6, 14, 0.8));
+               border: 1.5px solid rgba(255, 110, 110, 0.35);
+               box-shadow: 0 14px 44px rgba(90, 0, 10, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+               color: #fff; font-size: 44px; font-weight: 600; letter-spacing: -0.01em; white-space: nowrap; }
+      .alert svg { width: 46px; height: 46px; flex: none; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="{{DURATION}}" data-width="1080" data-height="1920"></div>
+    <script>
+      /* Filled by minimal_style.py: phrases and alerts with their times in the edit. */
+      const DATA = {{DATA}};
+
+      const KEY_MAX_WIDTH = 960;
+      const IN = 0.28, KEY_IN = 0.38, OUT = 0.15, LEAD = 0.04, FLY = 0.75, WOBBLE = 0.6;
+      const LIME = "#d4ff3f";
+      const FLYING = {
+        plane: `<svg viewBox="0 0 48 48" fill="none" stroke="${LIME}" stroke-width="3.4" stroke-linejoin="round"><path d="M44 5 4 21.5l15 5.5 5.5 15Z"/><path d="M19 27 44 5"/></svg>`,
+        sparkle: `<svg viewBox="0 0 48 48"><path d="M24 3c2 11 6 15 21 21-15 6-19 10-21 21-2-11-6-15-21-21 15-6 19-10 21-21Z" fill="${LIME}"/></svg>`,
+        arrow: `<svg viewBox="0 0 48 48" fill="none" stroke="${LIME}" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 38c4-16 16-26 32-28"/><path d="M30 6l10 4-5 10"/></svg>`,
+      };
+      const ICONS = {
+        warning: '<svg viewBox="0 0 48 48"><path d="M24 4 46 43H2Z" fill="#ff3b3b"/><path d="M24 17v13" stroke="#fff" stroke-width="4.5" stroke-linecap="round"/><circle cx="24" cy="36.5" r="2.6" fill="#fff"/></svg>',
+        x: '<svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="21" fill="rgba(255,255,255,.14)"/><path d="m16 16 16 16M32 16 16 32" stroke="#fff" stroke-width="4.5" stroke-linecap="round"/></svg>',
+        check: '<svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="21" fill="#3ccf6b"/><path d="m14 25 7 7 13-15" stroke="#fff" stroke-width="4.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+      };
+      const root = document.getElementById("root");
+      const tl = gsap.timeline({ paused: true });
+
+      const node = (tag, className, parent) => parent.appendChild(Object.assign(document.createElement(tag), { className }));
+      const hidden = { opacity: 0, filter: "blur(14px)", y: 12 };
+      const shown = { opacity: 1, filter: "blur(0px)", y: 0, ease: "power3.out" };
+
+      function enter(el, from, at, duration) {
+        gsap.set(el, from);
+        tl.to(el, { ...shown, scale: 1, duration }, Math.max(0, at - LEAD));
+      }
+
+      function leave(el, at) {
+        tl.to(el, { opacity: 0, filter: "blur(10px)", scale: 0.97, duration: OUT, ease: "power2.in" }, Math.max(0, at - OUT));
+      }
+
+      function smallLine(words, className, parent) {
+        if (!words.length) return null;
+        const line = node("div", `small ${className}`, parent);
+        words.forEach((word, n) => {
+          const span = node("span", "w", line);
+          span.textContent = (n ? " " : "") + word.text;
+          enter(span, hidden, word.start, IN);
+        });
+        return line;
+      }
+
+      /* An icon that flies in from below right, settles beside the tail (or the keyword) and bobs. */
+      function flyingIcon(icon, host, end) {
+        const el = document.createElement("span");
+        el.className = "icon";
+        el.innerHTML = FLYING[icon.name] || FLYING.plane;
+        if (host.classList.contains("key")) host.append(el);
+        else host.prepend(el);
+        gsap.set(el, { x: 300, y: 340, rotation: -40, scale: 0.5, opacity: 0 });
+        const at = Math.max(0, icon.start - LEAD);
+        tl.to(el, { x: 0, y: 0, rotation: 0, scale: 1, opacity: 1, duration: FLY, ease: "power3.out" }, at);
+        const bobs = Math.floor((end - at - FLY) / WOBBLE);
+        if (bobs > 0) tl.to(el, { rotation: 8, y: -8, duration: WOBBLE, ease: "sine.inOut", yoyo: true, repeat: bobs - 1 }, at + FLY);
+      }
+
+      DATA.phrases.forEach((p) => {
+        const el = node("div", "phrase", root);
+        el.style.top = `${p.y}px`;
+        if (p.scrim) {
+          /* Dark backdrop behind a caption on a bright picture (minimal_style.check_contrast). */
+          const backdrop = node("div", "backdrop", el);
+          gsap.set(backdrop, { opacity: 0 });
+          tl.to(backdrop, { opacity: p.scrim, duration: 0.25, ease: "power2.out" }, Math.max(0, p.start - LEAD));
+        }
+        smallLine(p.lead, "lead", el);
+        const key = node("div", "key", el);
+        key.textContent = p.key.text;
+        if (key.offsetWidth > KEY_MAX_WIDTH) key.style.fontSize = `${150 * KEY_MAX_WIDTH / key.offsetWidth}px`;
+        enter(key, { opacity: 0, filter: "blur(22px)", scale: 1.18 }, p.key.start, KEY_IN);
+        if (p.strike) {
+          const bar = node("i", "strike", key);
+          gsap.set(bar, { rotation: -4, scaleX: 0, transformOrigin: "left center" });
+          tl.to(bar, { scaleX: 1, duration: 0.3, ease: "power2.inOut" }, p.key.start + 0.3);
+        }
+        const tail = smallLine(p.tail, "tail", el);
+        if (p.icon) flyingIcon(p.icon, tail || key, p.end);
+        gsap.set(el, { opacity: 1 });
+        leave(el, p.end);
+      });
+
+      DATA.alerts.forEach((a) => {
+        const el = node("div", "alert", root);
+        el.style.top = `${a.y}px`;
+        if (ICONS[a.icon]) el.innerHTML = ICONS[a.icon];
+        else node("span", "", el).textContent = a.icon;
+        node("span", "", el).textContent = a.text;
+        enter(el, { opacity: 0, filter: "blur(12px)", y: 34 }, a.start, IN);
+        leave(el, a.end);
+      });
+
+      window.__timelines = window.__timelines || {};
+      window.__timelines["main"] = tl;
+      tl.seek(0);
+    </script>
+  </body>
+</html>

@@ -1,4 +1,4 @@
-# 0827 style: where things go
+# Della style (default): where things go
 
 The style comes from the CapCut project "0827 (1)", a promo for a scholarship program. These rules describe *when* each element appears. The builder handles how it looks. Treat the numbers as feel, not targets.
 

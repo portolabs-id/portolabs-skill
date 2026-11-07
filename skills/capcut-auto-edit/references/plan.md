@@ -52,3 +52,45 @@ To time a motion graphic to the edit, run `build_draft.py <plan.json> --timeline
 | `credit` | no | Creator name for the "Original content from …" watermark that moves corners. |
 
 `hook`, each card, each logo group (its title) and `cta` also take an optional `"y"`: the vertical position from −1 (bottom) to 1 (top), used when the layout check reports two texts overlapping. Captions move out of the way on their own.
+
+## Style
+
+`"style"` picks the look: `"della"` (default, every field above) or `"minimal"`. A field that belongs to the other style stops the build with a message, so a plan never loses an element silently.
+
+## Minimal fields
+
+A minimal plan uses `name`, `aroll`, `words`, `keep`, `word_fixes`, `trim_tail`, `broll`, `posters`, `clicks`, `punch_in`, `subtitles`, `grading` and `end_hold` as above, never `hook`, `cards`, `logos`, `cta` or `credit`, and adds:
+
+```json
+{
+  "style": "minimal",
+  "emphasis": [2, 16, 38, 78, 106, 122, 203],
+  "strike": [59],
+  "alerts": [
+    {"text": "nunggu mood dulu?", "from_word": 4, "to_word": 12},
+    {"text": "harus punya laptop?", "icon": "✖️", "from_word": 8, "to_word": 12}
+  ],
+  "rec": [{"from_word": 18, "to_word": 30}],
+  "rings": [{"from_word": 0, "to_word": 3, "x": -0.08, "y": 0.16, "size": 0.55}],
+  "behind": [26],
+  "icons": [{"word": 78, "icon": "plane"}, {"word": 107, "icon": "sparkle"}],
+  "head_y": 0.42,
+  "glitch": [31, 52, 108],
+  "end_fade": true
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `emphasis` | The highlighted words: each gets a caption (its big lime keyword with a few small words around it), and nothing else does. One every 3–5 s. Without any, the builder picks some about 3.5 s apart. |
+| `strike` | Words that get a red line across them a moment after they appear. Each is also a keyword. |
+| `behind` | Words whose phrase sits behind the speaker's head: placed at `head_y`, cut out with an Apple Vision person matte. Each is also a keyword. |
+| `icons` | A flying icon (`plane`, `sparkle` or `arrow`; default `plane`) in the phrase holding `word`, from that word on. |
+| `head_y` | Height of `behind` phrases (−1…1, default 0.45): where the keyword overlaps the top of the head. |
+| `alerts` | Dark red cards with `icon` (default ⚠️) and `text`. Cards that overlap in time stack downwards. Captions hide while a card shows. Pop SFX. |
+| `rec` | Spans with the camera viewfinder (corners, red dot, REC). Click SFX. |
+| `rings` | Spans with a glowing circle centred on `x`, `y` (−1…1, default 0, 0.3), `size` wide (share of the frame width, default 0.5). Captions move to the top meanwhile. |
+| `glitch` | Words where a Signal Glitch 2 transition and a swish land, on the cut nearest the word's start. |
+| `end_fade` | Fade to black over the last 0.8 s. Default `true`. |
+
+The build renders the captions and alerts into `<plan folder>/minimal/` (a HyperFrames project and a ProRes 4444 video with transparency), draws the PNGs there too, and copies what the draft uses into the draft folder. The dry-run writes the HyperFrames project but does not render it.

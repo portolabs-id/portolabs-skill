@@ -146,3 +146,5 @@ python3 <skill>/scripts/preview_draft.py "<draft dir it printed>" <work>/motion.
 Send the user `preview.mp4` (motion with the voice exactly as the draft cuts it). Then tell them:
 open the draft in CapCut, add music from CapCut's library about 12 dB under the voice, export
 1080x1920, post.
+
+Write the Instagram caption with the `reel-caption` skill next to this one.

@@ -22,6 +22,7 @@ The repo is private, so your GitHub login (`gh auth login`) must have access to 
 | `portolabs:capcut-asmr-edit` | Turning a long raw process video (laptop/PC service, cleaning, repair) into several short satisfying reels over a background song, as one CapCut project with a timeline per reel. macOS only; needs CapCut and `ffmpeg`, and `capcut-auto-edit` next to it. |
 | `portolabs:explainer-reel` | Turning a topic into a 30–90 s vertical explainer reel in the clean grid style: trend research, hooks and script approved first, then ElevenLabs voice, real logos and screenshots, HyperFrames motion, delivered as a CapCut draft. macOS only; needs CapCut, `ffmpeg`, `uv`, Node 22+, Chrome, an ElevenLabs key, and `capcut-auto-edit` next to it. |
 | `portolabs:capcut-webinar-edit` | Cutting a 1–2 hour webinar recording into lesson videos (one topic each, material only, Portolabs intro and outro) as landscape CapCut drafts, ready for `classmate-import`. macOS only; needs CapCut, `ffmpeg` and `mlx_whisper`, and `capcut-auto-edit` and `capcut-asmr-edit` next to it. |
+| `portolabs:reel-caption` | Writing the Instagram caption for a finished `explainer-reel` reel (@dibalikharga): opening tension, what it means for the viewer's money, dated facts, one question, sources, photo credits and at most 5 hashtags. |
 
 ## Adding a skill
 

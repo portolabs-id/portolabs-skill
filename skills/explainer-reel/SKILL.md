@@ -124,13 +124,17 @@ After the go, write `<work>/script.json` from the chosen hook and the brief's ta
    ```bash
    python3 <skill>/scripts/new_composition.py <work>
    ```
-   Write the `SCENES` block of `<work>/motion/index.html`, one scene per beat (style.md). Then, in `<work>/motion`:
+   It prints the moment each scene is fully built (`<built>`). Write the `SCENES` block of
+   `<work>/motion/index.html`, one scene per beat (style.md). Then, in `<work>/motion`:
    ```bash
-   DO_NOT_TRACK=1 npx -y hyperframes@0.9.14 check
-   DO_NOT_TRACK=1 npx -y hyperframes@0.9.14 snapshot --at <start of each beat>,<last second>
+   DO_NOT_TRACK=1 npx -y hyperframes@0.9.14 check --at <built> --no-collapse-static
+   DO_NOT_TRACK=1 npx -y hyperframes@0.9.14 snapshot --at <built>
    DO_NOT_TRACK=1 npx -y hyperframes@0.9.14 render -f 60 -o ../motion.mp4
    ```
-   Fix every ✗ from `check`, and read the snapshot contact sheet before rendering.
+   Always pass both flags: a bare `check` samples 9 moments and can miss a whole scene, and without
+   `--no-collapse-static` a problem seen at only one of those moments is dropped. Fix every ✗,
+   `text_box_overflow` (text running out of its card) included, then read the snapshot contact sheet
+   before rendering (style.md, Checks before render).
 
 After the voice changes, run steps 1, 2 and `new_composition.py` again (it keeps the scenes
 written), and check the scenes still fit their words. Never change `keep`, `word_fixes` or
@@ -146,3 +150,5 @@ python3 <skill>/scripts/preview_draft.py "<draft dir it printed>" <work>/motion.
 Send the user `preview.mp4` (motion with the voice exactly as the draft cuts it). Then tell them:
 open the draft in CapCut, add music from CapCut's library about 12 dB under the voice, export
 1080x1920, post.
+
+Write the Instagram caption with the `reel-caption` skill next to this one.
